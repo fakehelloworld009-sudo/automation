@@ -771,152 +771,134 @@ async function executeFillInFrame(frame: any, target: string, fillValue: string,
     const targetLower = target.toLowerCase();
     
     try {
-        // PATTERN 1: Label-associated inputs (HIGHEST ACCURACY)
+        // PATTERN 1A: Match by title attribute (for Oracle fields)
+        try {
+            const inputs = await frame.locator('input, textarea').all();
+            for (const input of inputs) {
+                const title = await input.getAttribute('title').catch(() => '');
+                const placeholder = await input.getAttribute('placeholder').catch(() => '');
+                const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
+                const name = await input.getAttribute('name').catch(() => '');
+                const id = await input.getAttribute('id').catch(() => '');
+                
+                const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`.toLowerCase();
+                
+                if (allAttrs.includes(targetLower)) {
+                    try {
+                        await input.scrollIntoViewIfNeeded();
+                        await input.waitForElementState('visible', {timeout: 3000}).catch(() => {});
+                        await input.click({force: true});
+                        await input.selectText().catch(() => {});
+                        await input.fill(fillValue, {timeout: 5000});
+                        await input.dispatchEvent('input');
+                        await input.dispatchEvent('change');
+                        await input.dispatchEvent('blur');
+                        log(`[FILL] ✓ Pattern 1A: Successfully filled "${title || name || id}" = "${fillValue}"`);
+                        return true;
+                    } catch (e: any) {
+                        log(`[FILL] Pattern 1A failed: ${e.message}`);
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // PATTERN 1B: Label-associated inputs
         try {
             const labels = await frame.locator('label').all();
-            
             for (const label of labels) {
-                try {
-                    const labelText = await label.textContent().catch(() => '');
+                const labelText = await label.textContent().catch(() => '');
+                if (labelText && labelText.trim().toLowerCase().includes(targetLower)) {
+                    const forAttr = await label.getAttribute('for').catch(() => '');
+                    let inputEl: any = null;
                     
-                    if (labelText && labelText.trim().toLowerCase().includes(targetLower)) {
-                        // Get associated input
-                        const forAttr = await label.getAttribute('for').catch(() => '');
-                        let inputEl = null;
-                        
-                        if (forAttr) {
-                            try {
-                                inputEl = await frame.locator(`#${forAttr}`).first();
-                            } catch (e) {}
-                        }
-                        
-                        if (!inputEl) {
-                            inputEl = await label.locator('input, textarea, [contenteditable]').first();
-                        }
-                        
-                        if (inputEl) {
-                            try {
-                                await inputEl.scrollIntoViewIfNeeded();
-                                await inputEl.fill(fillValue);
-                                await inputEl.dispatchEvent('change');
-                                log(`[FILL] Pattern 1: Successfully filled label "${labelText.trim()}" with value "${fillValue}"`);
-                                return true;
-                            } catch (fillError: any) {
-                                log(`[FILL] Pattern 1: Label match found "${labelText.trim()}" but fill failed: ${fillError.message}`);
-                                // Try click + clear + type approach
-                                try {
-                                    await inputEl.click();
-                                    await inputEl.fill('');
-                                    await inputEl.type(fillValue);
-                                    await inputEl.dispatchEvent('change');
-                                    log(`[FILL] Pattern 1: Successfully filled via click+type fallback for "${labelText.trim()}"`);
-                                    return true;
-                                } catch (e) {}
-                            }
-                        }
+                    if (forAttr) {
+                        inputEl = await frame.locator(`#${forAttr}`).first().catch(() => null);
                     }
-                } catch (e) {
-                    // Try next label
-                }
-            }
-        } catch (e) {
-            // Pattern 1 failed
-        }
-
-        // PATTERN 2: Direct input attributes (placeholder, aria-label, name, id)
-        try {
-            const inputs = await frame.locator('input, textarea, [contenteditable="true"]').all();
-            
-            for (const input of inputs) {
-                try {
-                    const placeholder = await input.getAttribute('placeholder').catch(() => '');
-                    const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
-                    const name = await input.getAttribute('name').catch(() => '');
-                    const id = await input.getAttribute('id').catch(() => '');
-                    const dataTestId = await input.getAttribute('data-testid').catch(() => '');
+                    if (!inputEl) {
+                        inputEl = await label.locator('input, textarea').first().catch(() => null);
+                    }
                     
-                    const allAttrs = `${placeholder} ${ariaLabel} ${name} ${id} ${dataTestId}`.toLowerCase();
-                    
-                    if (allAttrs.includes(targetLower)) {
+                    if (inputEl) {
                         try {
-                            await input.scrollIntoViewIfNeeded();
-                            await input.fill(fillValue);
-                            await input.dispatchEvent('change');
-                            log(`[FILL] Pattern 2: Successfully filled via input attributes (placeholder/name/id/aria-label) for "${target}"`);
+                            await inputEl.scrollIntoViewIfNeeded();
+                            await inputEl.click({force: true});
+                            await inputEl.fill(fillValue, {timeout: 5000});
+                            await inputEl.dispatchEvent('change');
+                            await inputEl.dispatchEvent('blur');
+                            log(`[FILL] ✓ Pattern 1B: Successfully filled label "${labelText.trim()}" = "${fillValue}"`);
                             return true;
-                        } catch (fillError: any) {
-                            log(`[FILL] Pattern 2: Attribute match found but fill failed: ${fillError.message}`);
-                            // Try alternative fill method
-                            try {
-                                await input.click();
-                                await input.fill('');
-                                await input.type(fillValue);
-                                await input.dispatchEvent('change');
-                                log(`[FILL] Pattern 2: Successfully filled via click+type fallback for "${target}"`);
-                                return true;
-                            } catch (e) {}
+                        } catch (e: any) {
+                            log(`[FILL] Pattern 1B failed: ${e.message}`);
                         }
                     }
-                } catch (e) {
-                    // Try next input
                 }
             }
-        } catch (e) {
-            // Pattern 2 failed
-        }
+        } catch (e) {}
 
-        // PATTERN 3: Text proximity search (input near matching text)
+        // PATTERN 2: Direct JavaScript fill (for stubborn fields)
         try {
-            const allElements = await frame.locator('*').all();
-            const maxElements = Math.min(allElements.length, 500);
-            
-            for (let i = 0; i < maxElements; i++) {
-                try {
-                    const el = allElements[i];
-                    const text = await el.textContent().catch(() => '');
+            const filled = await frame.evaluate(({ searchText, fillVal }) => {
+                const allInputs = document.querySelectorAll('input, textarea');
+                for (const input of Array.from(allInputs)) {
+                    const el = input as HTMLInputElement | HTMLTextAreaElement;
+                    const title = el.getAttribute('title') || '';
+                    const placeholder = el.getAttribute('placeholder') || '';
+                    const ariaLabel = el.getAttribute('aria-label') || '';
+                    const name = el.getAttribute('name') || '';
+                    const id = el.getAttribute('id') || '';
                     
-                    if (text && text.toLowerCase().includes(targetLower)) {
-                        // Look for nearby input
-                        const nearbyInput = await frame.evaluate(({ targetText }) => {
-                            const elem = Array.from(document.querySelectorAll('*'))
-                                .find(e => e.textContent?.toLowerCase().includes(targetText.toLowerCase()));
+                    const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`.toLowerCase();
+                    
+                    if (allAttrs.includes(searchText.toLowerCase())) {
+                        try {
+                            // Directly manipulate DOM
+                            el.value = fillVal;
+                            el.dispatchEvent(new Event('input', {bubbles: true}));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                            el.dispatchEvent(new Event('blur', {bubbles: true}));
                             
-                            if (!elem) return null;
-                            
-                            // Check siblings and nearby elements
-                            let current: Element | null = elem;
-                            for (let depth = 0; depth < 3; depth++) {
-                                current = current?.parentElement || null;
-                                if (!current) break;
-                                
-                                const input = current.querySelector('input, textarea, [contenteditable]');
-                                if (input) return input;
-                            }
-                            
-                            return null;
-                        }, { targetText: target }).catch(() => null);
-                        
-                        if (nearbyInput) {
-                            const nearbyLoc = frame.locator('input, textarea, [contenteditable="true"]').nth(i % 50);
-                            
-                            try {
-                                await nearbyLoc.fill(fillValue);
-                                await nearbyLoc.dispatchEvent('change');
-                                log(`[FILL] Pattern 3: Filled via text proximity search for "${target}"`);
+                            // Also try Playwright fill if element is interactive
+                            if (el.offsetParent !== null) { // Check if visible
                                 return true;
-                            } catch (e) {}
-                        }
+                            }
+                        } catch (e) {}
                     }
-                } catch (e) {
-                    // Try next element
+                }
+                return false;
+            }, {searchText: target, fillVal: fillValue});
+            
+            if (filled) {
+                log(`[FILL] ✓ Pattern 2: Successfully filled via direct JS manipulation = "${fillValue}"`);
+                return true;
+            }
+        } catch (e) {}
+
+        // PATTERN 3: Fallback - search by position and fill
+        try {
+            const inputs = await frame.locator('input[type="text"], textarea').all();
+            for (let i = 0; i < inputs.length; i++) {
+                const input = inputs[i];
+                const value = await input.inputValue().catch(() => '');
+                const name = await input.getAttribute('name').catch(() => '');
+                const id = await input.getAttribute('id').catch(() => '');
+                
+                // Look for fastpath or similar pattern field
+                if ((name && name.toLowerCase().includes('fast')) || 
+                    (id && id.toLowerCase().includes('fast')) ||
+                    (value && value === '')) {
+                    try {
+                        await input.click({force: true});
+                        await input.fill(fillValue, {timeout: 5000});
+                        await input.dispatchEvent('change');
+                        log(`[FILL] ✓ Pattern 3: Filled field at position ${i} = "${fillValue}"`);
+                        return true;
+                    } catch (e) {}
                 }
             }
-        } catch (e) {
-            // Pattern 3 failed
-        }
-        
+        } catch (e) {}
+
     } catch (error: any) {
-        // Frame fill error
+        log(`[FILL] Frame error: ${error.message}`);
     }
     
     return false;
