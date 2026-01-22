@@ -536,18 +536,19 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                 // Search for ANY element matching the text in iframe
                                 const allElements = iframeDoc.querySelectorAll('*');
                                 for (const el of Array.from(allElements)) {
-                                    const text = el.textContent || '';
-                                    const isClickable = el.tagName === 'BUTTON' ||
-                                        el.tagName === 'A' ||
-                                        el.getAttribute('role') === 'button' ||
-                                        el.getAttribute('onclick') !== null ||
-                                        el.getAttribute('role') === 'tab';
+                                    const element = el as HTMLElement;
+                                    const text = element.textContent || '';
+                                    const isClickable = element.tagName === 'BUTTON' ||
+                                        element.tagName === 'A' ||
+                                        element.getAttribute('role') === 'button' ||
+                                        element.getAttribute('onclick') !== null ||
+                                        element.getAttribute('role') === 'tab';
                                     
                                     if (text.toLowerCase().includes(searchText.toLowerCase()) && isClickable) {
-                                        const rect = (el as HTMLElement).getBoundingClientRect();
+                                        const rect = element.getBoundingClientRect();
                                         if (rect.width > 0 && rect.height > 0) {
-                                            (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                            (el as HTMLElement).click();
+                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            element.click();
                                             return true;
                                         }
                                     }
