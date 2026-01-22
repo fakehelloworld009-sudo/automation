@@ -938,463 +938,223 @@ async function advancedElementSearch(target, action, fillValue, maxRetries = 3) 
     }
     return false;
 }
-async function clickWithRetry(target, maxRetries = 5) {
-    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
-    const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
-    if (advancedResult) {
-        return true;
-    }
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // Check if page is still valid before attempting
-            if (!state.page || state.page.isClosed()) {
-                await switchToLatestPage();
-                if (!state.page || state.page.isClosed()) {
-                    return false;
-                }
-            }
-            // Strategy 0: Handle visible modals/overlays - focus and click
-            try {
-                const isClickable = await state.page?.evaluate((searchText) => {
-                    // Find all visible elements matching text
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of Array.from(allElements)) {
-                        if (el.textContent?.includes(searchText)) {
-                            const style = window.getComputedStyle(el);
-                            // Check if visible (not hidden, not display none, not visibility hidden)
-                            if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
-                                if (el.tagName === 'BUTTON' ||
-                                    el.tagName === 'A' ||
-                                    el.getAttribute('role') === 'button' ||
-                                    el.getAttribute('role') === 'tab' ||
-                                    el.getAttribute('onclick') !== null ||
-                                    (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')) {
-                                    const rect = el.getBoundingClientRect();
-                                    // Only consider elements that are actually in viewport or can be scrolled to
-                                    if (rect.width > 0 && rect.height > 0) {
-                                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        el.focus();
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    return false;
-                }, target);
-                if (isClickable) {
-                    await state.page?.waitForTimeout(300);
-                    await state.page?.keyboard.press('Enter');
-                    return true;
-                }
-            }
-            catch (e0) {
-                // Modal strategy failed, continue
-            }
-            // Strategy 1: Try direct selector with scroll
-            try {
-                await scrollToElement(target);
-                await state.page?.click(target, { timeout: 3000 });
-                return true;
-            }
-            catch (e1) {
-                // Direct selector failed
-            }
-            // Strategy 2: Find by text and click
-            try {
-                log(`Searching for text: ${target}`);
-                const scrollSuccess = await scrollToElementByText(target);
-                if (scrollSuccess) {
-                    const buttonSelector = await findButtonByText(target);
-                    if (buttonSelector) {
-                        log(`Found button by text: ${buttonSelector}`);
-                        await state.page?.click(buttonSelector, { timeout: 3000 });
-                        log(`Clicked by text matching`);
+/**
+ * SIMPLIFIED CLICK - Single comprehensive search, NO infinite loops
+ * Searches: Main page → All iframes → All popup windows
+ * If found: click it and return true
+ * If NOT found: return false and move to next step (NO RETRIES)
+ */
+async function clickWithRetry(target, maxRetries = 1) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    log(`[CLICK SEARCH] Looking for: "${target}"`);
+    try {
+        // Search 1: Main page visible clickables
+        const mainPageClicked = await state.page.evaluate((searchText) => {
+            const searchLower = searchText.toLowerCase();
+            const clickables = document.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
+            for (const el of Array.from(clickables)) {
+                const text = el.textContent?.toLowerCase() || '';
+                const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+                const title = el.getAttribute('title')?.toLowerCase() || '';
+                if (text.includes(searchLower) || ariaLabel.includes(searchLower) || title.includes(searchLower)) {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    if (rect.width > 0 && rect.height > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden') {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.click();
                         return true;
                     }
                 }
             }
-            catch (e2) {
-                log(`Text matching failed`);
-            }
-            // Strategy 2.5: Shadow DOM and nested element search
-            try {
-                log(`Searching through Shadow DOM and nested elements...`);
-                const shadowFound = await state.page?.evaluate((searchText) => {
-                    // Walk through all elements including shadow DOM
-                    const walk = (node) => {
-                        if (node.nodeType === 1) { // Element node
-                            const el = node;
-                            if (el.textContent?.includes(searchText) && (el.tagName === 'BUTTON' ||
-                                el.tagName === 'A' ||
-                                el.getAttribute('role') === 'button' ||
-                                el.getAttribute('role') === 'tab' ||
-                                el.getAttribute('onclick') !== null)) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    el.click();
-                                    return true;
-                                }
-                            }
-                            // Check shadow root
-                            if (el.shadowRoot) {
-                                if (walk(el.shadowRoot))
-                                    return true;
-                            }
-                        }
-                        // Walk children
-                        for (let child of node.childNodes) {
-                            if (walk(child))
-                                return true;
-                        }
-                        return false;
-                    };
-                    return walk(document);
-                }, target);
-                if (shadowFound) {
-                    log(`Clicked element in shadow DOM`);
-                    await state.page?.waitForTimeout(800);
-                    return true;
-                }
-            }
-            catch (e2_5) {
-                log(`Shadow DOM search failed`);
-            }
-            // Strategy 3: Search in iframes (PRIORITIZED - do this FIRST)
-            try {
-                log(`Searching in iframes for: ${target}...`);
-                const clickedInIframe = await state.page?.evaluate((searchText) => {
-                    const iframes = document.querySelectorAll('iframe');
-                    for (const iframe of Array.from(iframes)) {
-                        try {
-                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-                            if (iframeDoc) {
-                                // Search for ANY element matching the text in iframe
-                                const allElements = iframeDoc.querySelectorAll('*');
-                                for (const el of Array.from(allElements)) {
-                                    const element = el;
-                                    const text = element.textContent || '';
-                                    const isClickable = element.tagName === 'BUTTON' ||
-                                        element.tagName === 'A' ||
-                                        element.getAttribute('role') === 'button' ||
-                                        element.getAttribute('onclick') !== null ||
-                                        element.getAttribute('role') === 'tab';
-                                    if (text.toLowerCase().includes(searchText.toLowerCase()) && isClickable) {
-                                        const rect = element.getBoundingClientRect();
-                                        if (rect.width > 0 && rect.height > 0) {
-                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                            element.click();
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        catch (e) {
-                            // Cross-origin iframe
-                        }
-                    }
-                    return false;
-                }, target);
-                if (clickedInIframe) {
-                    log(`Clicked element in iframe`);
-                    await state.page?.waitForTimeout(800);
-                    return true;
-                }
-            }
-            catch (e3) {
-                log(`Iframe click failed`);
-            }
-            // Strategy 4: Force JavaScript click after scrolling
-            try {
-                await scrollToElementByText(target);
-                const success = await state.page?.evaluate((sel) => {
-                    const element = document.querySelector(sel);
-                    if (element) {
-                        element.click();
-                        return true;
-                    }
-                    return false;
-                }, target);
-                if (success) {
-                    await state.page?.waitForTimeout(800);
-                    return true;
-                }
-            }
-            catch (e4) {
-                // Force click failed
-            }
-            // Strategy 5: Search all clickable elements on page
-            try {
-                log(`Deep searching all clickable elements...`);
-                const found = await state.page?.evaluate((searchText) => {
-                    // Scroll to top first
-                    window.scrollTo(0, 0);
-                    // Deep search all possible elements
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of Array.from(allElements)) {
-                        const text = el.textContent || '';
-                        if (text.includes(searchText) && (el.tagName === 'BUTTON' ||
-                            el.tagName === 'A' ||
-                            el.getAttribute('role') === 'button' ||
-                            (el.tagName === 'INPUT' && el.getAttribute('type') === 'button'))) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            el.click();
+            return false;
+        }, target);
+        if (mainPageClicked) {
+            log(`✓ Found and clicked on main page`);
+            await state.page.waitForTimeout(500);
+            return true;
+        }
+        // Search 2: All iframes
+        const iframeClicked = await state.page.evaluate((searchText) => {
+            const searchLower = searchText.toLowerCase();
+            const iframes = document.querySelectorAll('iframe');
+            for (const iframe of Array.from(iframes)) {
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                    if (!iframeDoc)
+                        continue;
+                    const clickables = iframeDoc.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
+                    for (const el of Array.from(clickables)) {
+                        const htmlEl = el;
+                        const text = htmlEl.textContent?.toLowerCase() || '';
+                        const ariaLabel = htmlEl.getAttribute('aria-label')?.toLowerCase() || '';
+                        const title = htmlEl.getAttribute('title')?.toLowerCase() || '';
+                        if (text.includes(searchLower) || ariaLabel.includes(searchLower) || title.includes(searchLower)) {
+                            htmlEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            htmlEl.click();
                             return true;
                         }
                     }
-                    return false;
-                }, target);
-                if (found) {
-                    log(`Deep search click succeeded`);
-                    await state.page?.waitForTimeout(800);
-                    return true;
+                }
+                catch (e) {
+                    // Cross-origin iframe
                 }
             }
-            catch (e5) {
-                log(`Deep search failed`);
-            }
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(1500);
-            }
+            return false;
+        }, target);
+        if (iframeClicked) {
+            log(`✓ Found and clicked in iframe`);
+            await state.page.waitForTimeout(500);
+            return true;
         }
-        catch (error) {
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(1500);
-            }
-        }
-    }
-    return false;
-}
-async function fillWithRetry(target, value, maxRetries = 5) {
-    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
-    const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
-    if (advancedResult) {
-        return true;
-    }
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // Check if page is still valid before attempting
-            if (!state.page || state.page.isClosed()) {
-                log(`Page closed during fill attempt, recovering...`);
-                await switchToLatestPage();
-                if (!state.page || state.page.isClosed()) {
-                    return false;
-                }
-            }
-            // Strategy 0: Direct selector fill (if target is a CSS selector)
-            if (target.startsWith('[') || target.startsWith('#') || target.startsWith('.') || target.includes('>')) {
+        // Search 3: All popup windows
+        for (const popup of allPages) {
+            if (popup && !popup.isClosed()) {
                 try {
-                    await state.page?.fill(target, value, { timeout: 2000 });
-                    return true;
-                }
-                catch (e0) {
-                    // Direct selector failed
-                }
-            }
-            // Strategy 0.5: Find visible input in modals/overlays
-            try {
-                const filled = await state.page?.evaluate(({ searchText, value: fillValue }) => {
-                    const allInputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
-                    for (const input of Array.from(allInputs)) {
-                        const el = input;
-                        const style = window.getComputedStyle(el);
-                        const placeholder = input.placeholder || '';
-                        const label = input.getAttribute('aria-label') || '';
-                        const id = input.id || '';
-                        const name = input.name || '';
-                        // Check if visible and matches search text
-                        if (style.display !== 'none' && style.visibility !== 'hidden' &&
-                            (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
-                                label.toLowerCase().includes(searchText.toLowerCase()) ||
-                                id.toLowerCase().includes(searchText.toLowerCase()) ||
-                                name.toLowerCase().includes(searchText.toLowerCase()))) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) {
+                    const popupClicked = await popup.evaluate((searchText) => {
+                        const searchLower = searchText.toLowerCase();
+                        const clickables = document.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
+                        for (const el of Array.from(clickables)) {
+                            const text = el.textContent?.toLowerCase() || '';
+                            const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+                            if (text.includes(searchLower) || ariaLabel.includes(searchLower)) {
                                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                input.value = fillValue;
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
-                                input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                el.click();
                                 return true;
                             }
-                        }
-                    }
-                    return false;
-                }, { searchText: target, value });
-                if (filled) {
-                    return true;
-                }
-            }
-            catch (e0) {
-                // Modal input search failed
-            }
-            // Strategy 1: Fill in iframes FIRST (most important)
-            try {
-                const filledInIframe = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    const iframes = document.querySelectorAll('iframe');
-                    for (const iframe of Array.from(iframes)) {
-                        try {
-                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-                            if (iframeDoc) {
-                                const inputs = iframeDoc.querySelectorAll('input, textarea');
-                                for (const input of inputs) {
-                                    const placeholder = input.placeholder || '';
-                                    const label = input.getAttribute('aria-label') || '';
-                                    const id = input.id || '';
-                                    const name = input.name || '';
-                                    const value = input.value || '';
-                                    if (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        label.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        id.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        name.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        value.toLowerCase().includes(searchText.toLowerCase())) {
-                                        input.focus();
-                                        input.value = fillValue;
-                                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        catch (e) {
-                            // Cross-origin iframe
-                        }
-                    }
-                    return false;
-                }, { searchText: target, fillValue: value });
-                if (filledInIframe) {
-                    await state.page?.waitForTimeout(500);
-                    return true;
-                }
-            }
-            catch (e5) {
-                // Iframe fill attempt failed
-            }
-            // Strategy 2: Find by text pattern and fill any input
-            try {
-                const foundAndFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    // Search for any element containing the text
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of Array.from(allElements)) {
-                        const text = el.textContent || '';
-                        if (text.toLowerCase().includes(searchText.toLowerCase())) {
-                            // Look for nearby input
-                            const inputs = el.querySelectorAll('input, textarea');
-                            if (inputs.length > 0) {
-                                const input = inputs[0];
-                                input.value = fillValue;
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
-                                return true;
-                            }
-                            // Check parent for input
-                            let parent = el.parentElement;
-                            for (let i = 0; i < 5; i++) {
-                                if (!parent)
-                                    break;
-                                const parentInputs = parent.querySelectorAll('input, textarea');
-                                if (parentInputs.length > 0) {
-                                    const input = parentInputs[0];
-                                    input.value = fillValue;
-                                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                                    return true;
-                                }
-                                parent = parent.parentElement;
-                            }
-                        }
-                    }
-                    return false;
-                }, { searchText: target, fillValue: value });
-                if (foundAndFilled) {
-                    log(`Filled by pattern matching`);
-                    return true;
-                }
-            }
-            catch (e1) {
-                log(`Pattern matching fill failed`);
-            }
-            // Strategy 3: Scroll and direct fill
-            try {
-                log(`Scrolling to field...`);
-                await scrollToElement(target);
-                await state.page?.fill(target, value, { timeout: 3000 });
-                log(`Successfully filled via scroll`);
-                return true;
-            }
-            catch (e2) {
-                log(`Direct fill failed`);
-            }
-            // Strategy 4: Clear, type with scrolling
-            try {
-                log(`Clear and type with scroll...`);
-                await scrollToElement(target);
-                await state.page?.click(target, { timeout: 2000 });
-                await state.page?.keyboard.press('Control+A');
-                await state.page?.keyboard.press('Delete');
-                await state.page?.type(target, value, { delay: 50 });
-                log(`Filled using clear and type`);
-                return true;
-            }
-            catch (e3) {
-                log(`Clear and type failed`);
-            }
-            // Strategy 5: Shadow DOM fill
-            try {
-                log(`Searching in Shadow DOM to fill...`);
-                const shadowFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    const walk = (node) => {
-                        if (node.nodeType === 1) { // Element node
-                            const el = node;
-                            const placeholder = el.placeholder || '';
-                            const ariaLabel = el.getAttribute('aria-label') || '';
-                            if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-                                (placeholder.toLowerCase().includes(searchText.toLowerCase()) || ariaLabel.toLowerCase().includes(searchText.toLowerCase()))) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    el.value = fillValue;
-                                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                                    return true;
-                                }
-                            }
-                            // Check shadow root
-                            if (el.shadowRoot && walk(el.shadowRoot))
-                                return true;
-                        }
-                        // Walk children
-                        for (let child of node.childNodes) {
-                            if (walk(child))
-                                return true;
                         }
                         return false;
-                    };
-                    return walk(document);
-                }, { searchText: target, fillValue: value });
-                if (shadowFilled) {
-                    log(`Filled field in Shadow DOM`);
-                    return true;
+                    }, target);
+                    if (popupClicked) {
+                        log(`✓ Found and clicked in popup`);
+                        await popup.waitForTimeout(500);
+                        return true;
+                    }
+                }
+                catch (e) {
+                    // Popup error
                 }
             }
-            catch (e4) {
-                log(`Shadow DOM fill failed`);
-            }
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(1500);
-            }
         }
-        catch (error) {
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(1500);
-            }
-        }
+        log(`✗ Element not found anywhere: "${target}"`);
+        return false;
     }
-    return false;
+    catch (error) {
+        log(`[CLICK ERROR] ${error.message}`);
+        return false;
+    }
+}
+async function fillWithRetry(target, value, maxRetries = 1) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    log(`[FILL SEARCH] Looking for input: "${target}"`);
+    try {
+        // Search 1: Main page inputs
+        const mainPageFilled = await state.page.evaluate(({ searchText, fillValue }) => {
+            const searchLower = searchText.toLowerCase();
+            const inputs = document.querySelectorAll('input, textarea');
+            for (const input of Array.from(inputs)) {
+                const inputEl = input;
+                const placeholder = input.placeholder?.toLowerCase() || '';
+                const label = inputEl.getAttribute('aria-label')?.toLowerCase() || '';
+                const id = inputEl.getAttribute('id')?.toLowerCase() || '';
+                const name = inputEl.getAttribute('name')?.toLowerCase() || '';
+                if (placeholder.includes(searchLower) || label.includes(searchLower) ||
+                    id.includes(searchLower) || name.includes(searchLower)) {
+                    const rect = inputEl.getBoundingClientRect();
+                    const style = window.getComputedStyle(input);
+                    if (rect.width > 0 && rect.height > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden' &&
+                        !input.disabled) {
+                        inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        input.value = fillValue;
+                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }, { searchText: target, fillValue: value });
+        if (mainPageFilled) {
+            log(`✓ Found and filled input on main page`);
+            await state.page.waitForTimeout(300);
+            return true;
+        }
+        // Search 2: All iframes
+        const iframeFilled = await state.page.evaluate(({ searchText, fillValue }) => {
+            const searchLower = searchText.toLowerCase();
+            const iframes = document.querySelectorAll('iframe');
+            for (const iframe of Array.from(iframes)) {
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                    if (!iframeDoc)
+                        continue;
+                    const inputs = iframeDoc.querySelectorAll('input, textarea');
+                    for (const input of Array.from(inputs)) {
+                        const inputEl = input;
+                        const placeholder = input.placeholder?.toLowerCase() || '';
+                        const label = inputEl.getAttribute('aria-label')?.toLowerCase() || '';
+                        const id = inputEl.getAttribute('id')?.toLowerCase() || '';
+                        const name = inputEl.getAttribute('name')?.toLowerCase() || '';
+                        if (placeholder.includes(searchLower) || label.includes(searchLower) ||
+                            id.includes(searchLower) || name.includes(searchLower)) {
+                            input.value = fillValue;
+                            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                            inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        }
+                    }
+                }
+                catch (e) {
+                    // Cross-origin iframe
+                }
+            }
+            return false;
+        }, { searchText: target, fillValue: value });
+        if (iframeFilled) {
+            log(`✓ Found and filled input in iframe`);
+            await state.page.waitForTimeout(300);
+            return true;
+        }
+        // Search 3: All popup windows
+        for (const popup of allPages) {
+            if (popup && !popup.isClosed()) {
+                try {
+                    const popupFilled = await popup.evaluate(({ searchText, fillValue }) => {
+                        const searchLower = searchText.toLowerCase();
+                        const inputs = document.querySelectorAll('input, textarea');
+                        for (const input of Array.from(inputs)) {
+                            const placeholder = input.placeholder?.toLowerCase() || '';
+                            const label = input.getAttribute('aria-label')?.toLowerCase() || '';
+                            if (placeholder.includes(searchLower) || label.includes(searchLower)) {
+                                input.value = fillValue;
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            }
+                        }
+                        return false;
+                    }, { searchText: target, fillValue: value });
+                    if (popupFilled) {
+                        log(`✓ Found and filled input in popup`);
+                        await popup.waitForTimeout(300);
+                        return true;
+                    }
+                }
+                catch (e) {
+                    // Popup error
+                }
+            }
+        }
+        log(`✗ Input field not found anywhere: "${target}"`);
+        return false;
+    }
+    catch (error) {
+        log(`[FILL ERROR] ${error.message}`);
+        return false;
+    }
 }
 async function getAllPageElements() {
     if (!state.page || state.page.isClosed()) {
