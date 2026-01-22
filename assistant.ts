@@ -1399,25 +1399,78 @@ async function getAllPageElements(): Promise<any[]> {
             let elementIndex = 0;
 
             try {
-                // Helper: Find associated label text for an element
+                // Helper: Find associated label text for an element - COMPREHENSIVE SEARCH
                 const getAssociatedLabel = (el: Element): string => {
                     const id = el.getAttribute('id');
+                    const name = el.getAttribute('name');
                     
-                    // Try to find label with for attribute
+                    // Strategy 1: Try to find label with for attribute pointing to this element's id
                     if (id) {
                         const label = document.querySelector(`label[for="${id}"]`);
-                        if (label && label.textContent) {
+                        if (label && label.textContent?.trim()) {
                             return label.textContent.trim();
                         }
                     }
                     
-                    // Try to find parent label
+                    // Strategy 2: Try to find label with for attribute pointing to this element's name
+                    if (name) {
+                        const label = document.querySelector(`label[for="${name}"]`);
+                        if (label && label.textContent?.trim()) {
+                            return label.textContent.trim();
+                        }
+                    }
+                    
+                    // Strategy 3: Check if element is inside a label element
                     let parent = el.parentElement;
                     while (parent) {
                         if (parent.tagName === 'LABEL') {
-                            return parent.textContent?.trim() || '';
+                            const labelText = parent.textContent?.trim() || '';
+                            // Remove the input's own text if any
+                            return labelText.replace((el as any).value || '', '').trim();
                         }
                         parent = parent.parentElement;
+                    }
+                    
+                    // Strategy 4: Look for preceding label elements in the same container
+                    const container = el.parentElement;
+                    if (container) {
+                        const labels = Array.from(container.querySelectorAll('label'));
+                        for (const lbl of labels) {
+                            if (lbl.textContent?.trim()) {
+                                // Check if this label is associated with our element
+                                const forAttr = lbl.getAttribute('for');
+                                if (forAttr && (forAttr === id || forAttr === name)) {
+                                    return lbl.textContent.trim();
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Strategy 5: Look for aria-label or aria-labelledby
+                    const ariaLabelledby = el.getAttribute('aria-labelledby');
+                    if (ariaLabelledby) {
+                        const labelEl = document.getElementById(ariaLabelledby);
+                        if (labelEl && labelEl.textContent?.trim()) {
+                            return labelEl.textContent.trim();
+                        }
+                    }
+                    
+                    // Strategy 6: Look for title attribute
+                    const title = el.getAttribute('title');
+                    if (title?.trim()) {
+                        return title.trim();
+                    }
+                    
+                    // Strategy 7: Look for preceding text nodes or labels above the element
+                    let sibling = el.previousElementSibling;
+                    while (sibling) {
+                        if (sibling.tagName === 'LABEL' && sibling.textContent?.trim()) {
+                            return sibling.textContent.trim();
+                        }
+                        if (sibling.tagName === 'SPAN' && sibling.textContent?.trim() && sibling.textContent.length < 100) {
+                            return sibling.textContent.trim();
+                        }
+                        sibling = sibling.previousElementSibling;
                     }
                     
                     return '';
@@ -1425,19 +1478,33 @@ async function getAllPageElements(): Promise<any[]> {
 
                 // Helper: Get the display name for an element
                 const getDisplayName = (el: Element, tagName: string, textContent: string, placeholder: string, ariaLabel: string): string => {
-                    // For inputs, try to get associated label first
+                    // For inputs, try to get associated label first (PRIORITY 1)
                     if (tagName === 'input' || tagName === 'textarea') {
                         const labelText = getAssociatedLabel(el);
-                        if (labelText) {
+                        if (labelText && labelText.length > 0) {
                             return labelText;
                         }
                         
-                        // Fall back to placeholder or aria-label
-                        if (placeholder) return placeholder;
-                        if (ariaLabel) return ariaLabel;
+                        // Fall back to placeholder
+                        if (placeholder && placeholder.length > 0) return placeholder;
+                        // Fall back to aria-label
+                        if (ariaLabel && ariaLabel.length > 0) return ariaLabel;
+                        // Fall back to title
+                        const title = el.getAttribute('title');
+                        if (title && title.length > 0) return title;
                     }
                     
                     // For buttons and links, use text content
+                    if (textContent && textContent.length > 0) {
+                        return textContent;
+                    }
+                    
+                    // For other elements, use aria-label or placeholder
+                    if (ariaLabel && ariaLabel.length > 0) return ariaLabel;
+                    if (placeholder && placeholder.length > 0) return placeholder;
+                    
+                    return '';
+                };
                     if (textContent && textContent.length > 0) {
                         return textContent;
                     }
