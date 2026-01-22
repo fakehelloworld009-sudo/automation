@@ -1032,10 +1032,10 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 }
             }
 
-            // Strategy 0: Handle visible modals/overlays - focus and click
+            // Strategy 0: Handle visible modals/overlays - DIRECTLY CLICK visible elements
             try {
-                const isClickable = await state.page?.evaluate((searchText) => {
-                    // Find all visible elements matching text
+                const clicked = await state.page?.evaluate((searchText) => {
+                    // Find all visible elements matching text - INCLUDING in modals/overlays
                     const allElements = document.querySelectorAll('*');
                     for (const el of Array.from(allElements)) {
                         if (el.textContent?.includes(searchText)) {
@@ -1051,10 +1051,11 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                     (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')
                                 ) {
                                     const rect = (el as HTMLElement).getBoundingClientRect();
-                                    // Only consider elements that are actually in viewport or can be scrolled to
+                                    // Only consider elements that are actually visible
                                     if (rect.width > 0 && rect.height > 0) {
                                         (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        (el as HTMLElement).focus();
+                                        // DIRECTLY CLICK - don't just focus
+                                        (el as HTMLElement).click();
                                         return true;
                                     }
                                 }
@@ -1064,9 +1065,8 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                     return false;
                 }, target);
 
-                if (isClickable) {
-                    await state.page?.waitForTimeout(300);
-                    await state.page?.keyboard.press('Enter');
+                if (clicked) {
+                    await state.page?.waitForTimeout(800);
                     return true;
                 }
             } catch (e0) {
