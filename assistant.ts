@@ -1015,254 +1015,481 @@ async function advancedElementSearch(target: string, action: 'click' | 'fill', f
     return false;
 }
 
-/**
- * SIMPLIFIED CLICK - Single comprehensive search, NO infinite loops
- * Searches: Main page → All iframes → All popup windows
- * If found: click it and return true
- * If NOT found: return false and move to next step (NO RETRIES)
- */
-async function clickWithRetry(target: string, maxRetries: number = 1): Promise<boolean> {
-    if (!state.page || state.page.isClosed()) return false;
+async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
+    if (advancedResult) {
+        return true;
+    }
 
-    log(`[CLICK SEARCH] Looking for: "${target}"`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Check if page is still valid before attempting
+            if (!state.page || state.page.isClosed()) {
+                await switchToLatestPage();
+                if (!state.page || state.page.isClosed()) {
+                    return false;
+                }
+            }
 
-    try {
-        // Search 1: Main page visible clickables
-        const mainPageClicked = await state.page.evaluate((searchText) => {
-            const searchLower = searchText.toLowerCase();
-            const clickables = document.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
-            
-            for (const el of Array.from(clickables)) {
-                const text = el.textContent?.toLowerCase() || '';
-                const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
-                const title = el.getAttribute('title')?.toLowerCase() || '';
-                
-                if (text.includes(searchLower) || ariaLabel.includes(searchLower) || title.includes(searchLower)) {
-                    const rect = (el as HTMLElement).getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    
-                    if (rect.width > 0 && rect.height > 0 && 
-                        style.display !== 'none' && style.visibility !== 'hidden') {
-                        
-                        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        (el as HTMLElement).click();
+            // Strategy 0: Handle visible modals/overlays - focus and click
+            try {
+                const isClickable = await state.page?.evaluate((searchText) => {
+                    // Find all visible elements matching text
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        if (el.textContent?.includes(searchText)) {
+                            const style = window.getComputedStyle(el);
+                            // Check if visible (not hidden, not display none, not visibility hidden)
+                            if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                                if (
+                                    el.tagName === 'BUTTON' ||
+                                    el.tagName === 'A' ||
+                                    el.getAttribute('role') === 'button' ||
+                                    el.getAttribute('role') === 'tab' ||
+                                    el.getAttribute('onclick') !== null ||
+                                    (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')
+                                ) {
+                                    const rect = (el as HTMLElement).getBoundingClientRect();
+                                    // Only consider elements that are actually in viewport or can be scrolled to
+                                    if (rect.width > 0 && rect.height > 0) {
+                                        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        (el as HTMLElement).focus();
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return false;
+                }, target);
+
+                if (isClickable) {
+                    await state.page?.waitForTimeout(300);
+                    await state.page?.keyboard.press('Enter');
+                    return true;
+                }
+            } catch (e0) {
+                // Modal strategy failed, continue
+            }
+
+            // Strategy 1: Try direct selector with scroll
+            try {
+                await scrollToElement(target);
+                await state.page?.click(target, { timeout: 3000 });
+                return true;
+            } catch (e1) {
+                // Direct selector failed
+            }
+
+            // Strategy 2: Find by text and click
+            try {
+                log(`Searching for text: ${target}`);
+                const scrollSuccess = await scrollToElementByText(target);
+                if (scrollSuccess) {
+                    const buttonSelector = await findButtonByText(target);
+                    if (buttonSelector) {
+                        log(`Found button by text: ${buttonSelector}`);
+                        await state.page?.click(buttonSelector, { timeout: 3000 });
+                        log(`Clicked by text matching`);
                         return true;
                     }
                 }
+            } catch (e2) {
+                log(`Text matching failed`);
             }
-            return false;
-        }, target);
 
-        if (mainPageClicked) {
-            log(`✓ Found and clicked on main page`);
-            await state.page.waitForTimeout(500);
-            return true;
-        }
+            // Strategy 2.5: Shadow DOM and nested element search
+            try {
+                log(`Searching through Shadow DOM and nested elements...`);
+                const shadowFound = await state.page?.evaluate((searchText) => {
+                    // Walk through all elements including shadow DOM
+                    const walk = (node: any) => {
+                        if (node.nodeType === 1) { // Element node
+                            const el = node as HTMLElement;
+                            if (el.textContent?.includes(searchText) && (
+                                el.tagName === 'BUTTON' ||
+                                el.tagName === 'A' ||
+                                el.getAttribute('role') === 'button' ||
+                                el.getAttribute('role') === 'tab' ||
+                                el.getAttribute('onclick') !== null
+                            )) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    el.click();
+                                    return true;
+                                }
+                            }
+                            // Check shadow root
+                            if (el.shadowRoot) {
+                                if (walk(el.shadowRoot)) return true;
+                            }
+                        }
+                        // Walk children
+                        for (let child of node.childNodes) {
+                            if (walk(child)) return true;
+                        }
+                        return false;
+                    };
+                    return walk(document);
+                }, target);
 
-        // Search 2: All iframes
-        const iframeClicked = await state.page.evaluate((searchText) => {
-            const searchLower = searchText.toLowerCase();
-            const iframes = document.querySelectorAll('iframe');
-            
-            for (const iframe of Array.from(iframes)) {
-                try {
-                    const iframeDoc = (iframe as any).contentDocument || (iframe as any).contentWindow?.document;
-                    if (!iframeDoc) continue;
+                if (shadowFound) {
+                    log(`Clicked element in shadow DOM`);
+                    await state.page?.waitForTimeout(800);
+                    return true;
+                }
+            } catch (e2_5) {
+                log(`Shadow DOM search failed`);
+            }
+
+            // Strategy 3: Search in iframes (PRIORITIZED - do this FIRST)
+            try {
+                log(`Searching in iframes for: ${target}...`);
+                const clickedInIframe = await state.page?.evaluate((searchText) => {
+                    const iframes = document.querySelectorAll('iframe');
+                    for (const iframe of Array.from(iframes)) {
+                        try {
+                            const iframeDoc = (iframe as any).contentDocument || (iframe as any).contentWindow?.document;
+                            if (iframeDoc) {
+                                // Search for ANY element matching the text in iframe
+                                const allElements = iframeDoc.querySelectorAll('*');
+                                for (const el of Array.from(allElements)) {
+                                    const element = el as HTMLElement;
+                                    const text = element.textContent || '';
+                                    const isClickable = element.tagName === 'BUTTON' ||
+                                        element.tagName === 'A' ||
+                                        element.getAttribute('role') === 'button' ||
+                                        element.getAttribute('onclick') !== null ||
+                                        element.getAttribute('role') === 'tab';
+                                    
+                                    if (text.toLowerCase().includes(searchText.toLowerCase()) && isClickable) {
+                                        const rect = element.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            element.click();
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin iframe
+                        }
+                    }
+                    return false;
+                }, target);
+
+                if (clickedInIframe) {
+                    log(`Clicked element in iframe`);
+                    await state.page?.waitForTimeout(800);
+                    return true;
+                }
+            } catch (e3) {
+                log(`Iframe click failed`);
+            }
+
+            // Strategy 4: Force JavaScript click after scrolling
+            try {
+                await scrollToElementByText(target);
+                const success = await state.page?.evaluate((sel) => {
+                    const element = document.querySelector(sel);
+                    if (element) {
+                        (element as HTMLElement).click();
+                        return true;
+                    }
+                    return false;
+                }, target);
+
+                if (success) {
+                    await state.page?.waitForTimeout(800);
+                    return true;
+                }
+            } catch (e4) {
+                // Force click failed
+            }
+
+            // Strategy 5: Search all clickable elements on page
+            try {
+                log(`Deep searching all clickable elements...`);
+                const found = await state.page?.evaluate((searchText) => {
+                    // Scroll to top first
+                    window.scrollTo(0, 0);
                     
-                    const clickables = iframeDoc.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
-                    
-                    for (const el of Array.from(clickables)) {
-                        const htmlEl = el as HTMLElement;
-                        const text = htmlEl.textContent?.toLowerCase() || '';
-                        const ariaLabel = htmlEl.getAttribute('aria-label')?.toLowerCase() || '';
-                        const title = htmlEl.getAttribute('title')?.toLowerCase() || '';
-                        
-                        if (text.includes(searchLower) || ariaLabel.includes(searchLower) || title.includes(searchLower)) {
-                            htmlEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            htmlEl.click();
+                    // Deep search all possible elements
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        const text = el.textContent || '';
+                        if (text.includes(searchText) && (
+                            el.tagName === 'BUTTON' ||
+                            el.tagName === 'A' ||
+                            el.getAttribute('role') === 'button' ||
+                            (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')
+                        )) {
+                            (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            (el as HTMLElement).click();
                             return true;
                         }
                     }
-                } catch (e) {
-                    // Cross-origin iframe
+                    return false;
+                }, target);
+
+                if (found) {
+                    log(`Deep search click succeeded`);
+                    await state.page?.waitForTimeout(800);
+                    return true;
+                }
+            } catch (e5) {
+                log(`Deep search failed`);
+            }
+
+            if (attempt < maxRetries) {
+                await state.page?.waitForTimeout(1500);
+            }
+
+        } catch (error: any) {
+            if (attempt < maxRetries) {
+                await state.page?.waitForTimeout(1500);
+            }
+        }
+    }
+    return false;
+}
+
+async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
+    if (advancedResult) {
+        return true;
+    }
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Check if page is still valid before attempting
+            if (!state.page || state.page.isClosed()) {
+                log(`Page closed during fill attempt, recovering...`);
+                await switchToLatestPage();
+                if (!state.page || state.page.isClosed()) {
+                    return false;
                 }
             }
-            return false;
-        }, target);
 
-        if (iframeClicked) {
-            log(`✓ Found and clicked in iframe`);
-            await state.page.waitForTimeout(500);
-            return true;
-        }
-
-        // Search 3: All popup windows
-        for (const popup of allPages) {
-            if (popup && !popup.isClosed()) {
+            // Strategy 0: Direct selector fill (if target is a CSS selector)
+            if (target.startsWith('[') || target.startsWith('#') || target.startsWith('.') || target.includes('>')) {
                 try {
-                    const popupClicked = await popup.evaluate((searchText) => {
-                        const searchLower = searchText.toLowerCase();
-                        const clickables = document.querySelectorAll('button, a, [role="button"], [role="tab"], input[type="button"]');
+                    await state.page?.fill(target, value, { timeout: 2000 });
+                    return true;
+                } catch (e0) {
+                    // Direct selector failed
+                }
+            }
+
+            // Strategy 0.5: Find visible input in modals/overlays
+            try {
+                const filled = await state.page?.evaluate(({ searchText, value: fillValue }) => {
+                    const allInputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
+                    for (const input of Array.from(allInputs)) {
+                        const el = input as HTMLElement;
+                        const style = window.getComputedStyle(el);
+                        const placeholder = (input as any).placeholder || '';
+                        const label = (input as any).getAttribute('aria-label') || '';
+                        const id = (input as any).id || '';
+                        const name = (input as any).name || '';
                         
-                        for (const el of Array.from(clickables)) {
-                            const text = el.textContent?.toLowerCase() || '';
-                            const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
-                            
-                            if (text.includes(searchLower) || ariaLabel.includes(searchLower)) {
-                                (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                (el as HTMLElement).click();
+                        // Check if visible and matches search text
+                        if (style.display !== 'none' && style.visibility !== 'hidden' && 
+                            (placeholder.toLowerCase().includes(searchText.toLowerCase()) || 
+                             label.toLowerCase().includes(searchText.toLowerCase()) ||
+                             id.toLowerCase().includes(searchText.toLowerCase()) ||
+                             name.toLowerCase().includes(searchText.toLowerCase()))) {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                (input as any).value = fillValue;
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                input.dispatchEvent(new Event('blur', { bubbles: true }));
                                 return true;
                             }
                         }
-                        return false;
-                    }, target);
-
-                    if (popupClicked) {
-                        log(`✓ Found and clicked in popup`);
-                        await popup.waitForTimeout(500);
-                        return true;
                     }
-                } catch (e) {
-                    // Popup error
+                    return false;
+                }, { searchText: target, value });
+
+                if (filled) {
+                    return true;
                 }
+            } catch (e0) {
+                // Modal input search failed
             }
-        }
 
-        log(`✗ Element not found anywhere: "${target}"`);
-        return false;
-
-    } catch (error: any) {
-        log(`[CLICK ERROR] ${error.message}`);
-        return false;
-    }
-}
-
-async function fillWithRetry(target: string, value: string, maxRetries: number = 1): Promise<boolean> {
-    if (!state.page || state.page.isClosed()) return false;
-
-    log(`[FILL SEARCH] Looking for input: "${target}"`);
-
-    try {
-        // Search 1: Main page inputs
-        const mainPageFilled = await state.page.evaluate(({ searchText, fillValue }) => {
-            const searchLower = searchText.toLowerCase();
-            const inputs = document.querySelectorAll('input, textarea');
-            
-            for (const input of Array.from(inputs)) {
-                const inputEl = input as HTMLElement;
-                const placeholder = (input as any).placeholder?.toLowerCase() || '';
-                const label = inputEl.getAttribute('aria-label')?.toLowerCase() || '';
-                const id = inputEl.getAttribute('id')?.toLowerCase() || '';
-                const name = inputEl.getAttribute('name')?.toLowerCase() || '';
-                
-                if (placeholder.includes(searchLower) || label.includes(searchLower) || 
-                    id.includes(searchLower) || name.includes(searchLower)) {
-                    
-                    const rect = inputEl.getBoundingClientRect();
-                    const style = window.getComputedStyle(input);
-                    
-                    if (rect.width > 0 && rect.height > 0 && 
-                        style.display !== 'none' && style.visibility !== 'hidden' &&
-                        !(input as any).disabled) {
-                        
-                        inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        (input as any).value = fillValue;
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }, { searchText: target, fillValue: value });
-
-        if (mainPageFilled) {
-            log(`✓ Found and filled input on main page`);
-            await state.page.waitForTimeout(300);
-            return true;
-        }
-
-        // Search 2: All iframes
-        const iframeFilled = await state.page.evaluate(({ searchText, fillValue }) => {
-            const searchLower = searchText.toLowerCase();
-            const iframes = document.querySelectorAll('iframe');
-            
-            for (const iframe of Array.from(iframes)) {
-                try {
-                    const iframeDoc = (iframe as any).contentDocument || (iframe as any).contentWindow?.document;
-                    if (!iframeDoc) continue;
-                    
-                    const inputs = iframeDoc.querySelectorAll('input, textarea');
-                    
-                    for (const input of Array.from(inputs)) {
-                        const inputEl = input as HTMLElement;
-                        const placeholder = (input as any).placeholder?.toLowerCase() || '';
-                        const label = inputEl.getAttribute('aria-label')?.toLowerCase() || '';
-                        const id = inputEl.getAttribute('id')?.toLowerCase() || '';
-                        const name = inputEl.getAttribute('name')?.toLowerCase() || '';
-                        
-                        if (placeholder.includes(searchLower) || label.includes(searchLower) || 
-                            id.includes(searchLower) || name.includes(searchLower)) {
-                            
-                            (input as any).value = fillValue;
-                            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                            inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-                            return true;
+            // Strategy 1: Fill in iframes FIRST (most important)
+            try {
+                const filledInIframe = await state.page?.evaluate(({ searchText, fillValue }) => {
+                    const iframes = document.querySelectorAll('iframe');
+                    for (const iframe of Array.from(iframes)) {
+                        try {
+                            const iframeDoc = (iframe as any).contentDocument || (iframe as any).contentWindow?.document;
+                            if (iframeDoc) {
+                                const inputs = iframeDoc.querySelectorAll('input, textarea');
+                                for (const input of inputs) {
+                                    const placeholder = (input as any).placeholder || '';
+                                    const label = (input as any).getAttribute('aria-label') || '';
+                                    const id = (input as any).id || '';
+                                    const name = (input as any).name || '';
+                                    const value = (input as any).value || '';
+                                    
+                                    if (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        label.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        id.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        name.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        value.toLowerCase().includes(searchText.toLowerCase())) {
+                                        
+                                        (input as any).focus();
+                                        (input as any).value = fillValue;
+                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        return true;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin iframe
                         }
                     }
-                } catch (e) {
-                    // Cross-origin iframe
+                    return false;
+                }, { searchText: target, fillValue: value });
+                if (filledInIframe) {
+                    await state.page?.waitForTimeout(500);
+                    return true;
                 }
+            } catch (e5) {
+                // Iframe fill attempt failed
             }
-            return false;
-        }, { searchText: target, fillValue: value });
 
-        if (iframeFilled) {
-            log(`✓ Found and filled input in iframe`);
-            await state.page.waitForTimeout(300);
-            return true;
-        }
-
-        // Search 3: All popup windows
-        for (const popup of allPages) {
-            if (popup && !popup.isClosed()) {
-                try {
-                    const popupFilled = await popup.evaluate(({ searchText, fillValue }) => {
-                        const searchLower = searchText.toLowerCase();
-                        const inputs = document.querySelectorAll('input, textarea');
-                        
-                        for (const input of Array.from(inputs)) {
-                            const placeholder = (input as any).placeholder?.toLowerCase() || '';
-                            const label = input.getAttribute('aria-label')?.toLowerCase() || '';
-                            
-                            if (placeholder.includes(searchLower) || label.includes(searchLower)) {
+            // Strategy 2: Find by text pattern and fill any input
+            try {
+                const foundAndFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
+                    // Search for any element containing the text
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        const text = el.textContent || '';
+                        if (text.toLowerCase().includes(searchText.toLowerCase())) {
+                            // Look for nearby input
+                            const inputs = el.querySelectorAll('input, textarea');
+                            if (inputs.length > 0) {
+                                const input = inputs[0];
                                 (input as any).value = fillValue;
                                 input.dispatchEvent(new Event('input', { bubbles: true }));
                                 input.dispatchEvent(new Event('change', { bubbles: true }));
                                 return true;
                             }
+                            // Check parent for input
+                            let parent = el.parentElement;
+                            for (let i = 0; i < 5; i++) {
+                                if (!parent) break;
+                                const parentInputs = parent.querySelectorAll('input, textarea');
+                                if (parentInputs.length > 0) {
+                                    const input = parentInputs[0];
+                                    (input as any).value = fillValue;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                                parent = parent.parentElement;
+                            }
+                        }
+                    }
+                    return false;
+                }, { searchText: target, fillValue: value });
+
+                if (foundAndFilled) {
+                    log(`Filled by pattern matching`);
+                    return true;
+                }
+            } catch (e1) {
+                log(`Pattern matching fill failed`);
+            }
+
+            // Strategy 3: Scroll and direct fill
+            try {
+                log(`Scrolling to field...`);
+                await scrollToElement(target);
+                await state.page?.fill(target, value, { timeout: 3000 });
+                log(`Successfully filled via scroll`);
+                return true;
+            } catch (e2) {
+                log(`Direct fill failed`);
+            }
+
+            // Strategy 4: Clear, type with scrolling
+            try {
+                log(`Clear and type with scroll...`);
+                await scrollToElement(target);
+                await state.page?.click(target, { timeout: 2000 });
+                await state.page?.keyboard.press('Control+A');
+                await state.page?.keyboard.press('Delete');
+                await state.page?.type(target, value, { delay: 50 });
+                log(`Filled using clear and type`);
+                return true;
+            } catch (e3) {
+                log(`Clear and type failed`);
+            }
+
+            // Strategy 5: Shadow DOM fill
+            try {
+                log(`Searching in Shadow DOM to fill...`);
+                const shadowFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
+                    const walk = (node: any): boolean => {
+                        if (node.nodeType === 1) { // Element node
+                            const el = node as HTMLElement;
+                            const placeholder = (el as any).placeholder || '';
+                            const ariaLabel = el.getAttribute('aria-label') || '';
+                            
+                            if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && 
+                                (placeholder.toLowerCase().includes(searchText.toLowerCase()) || ariaLabel.toLowerCase().includes(searchText.toLowerCase()))) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    (el as any).value = fillValue;
+                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                            // Check shadow root
+                            if (el.shadowRoot && walk(el.shadowRoot)) return true;
+                        }
+                        // Walk children
+                        for (let child of node.childNodes) {
+                            if (walk(child)) return true;
                         }
                         return false;
-                    }, { searchText: target, fillValue: value });
+                    };
+                    return walk(document);
+                }, { searchText: target, fillValue: value });
 
-                    if (popupFilled) {
-                        log(`✓ Found and filled input in popup`);
-                        await popup.waitForTimeout(300);
-                        return true;
-                    }
-                } catch (e) {
-                    // Popup error
+                if (shadowFilled) {
+                    log(`Filled field in Shadow DOM`);
+                    return true;
                 }
+            } catch (e4) {
+                log(`Shadow DOM fill failed`);
+            }
+
+            if (attempt < maxRetries) {
+                await state.page?.waitForTimeout(1500);
+            }
+
+        } catch (error: any) {
+            if (attempt < maxRetries) {
+                await state.page?.waitForTimeout(1500);
             }
         }
-
-        log(`✗ Input field not found anywhere: "${target}"`);
-        return false;
-
-    } catch (error: any) {
-        log(`[FILL ERROR] ${error.message}`);
-        return false;
     }
+    return false;
 }
 
 async function getAllPageElements(): Promise<any[]> {
@@ -1660,48 +1887,31 @@ async function waitForPageReady(timeout: number = 30000): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
 
     const startTime = Date.now();
+    let lastActivityTime = Date.now();
     
     try {
-        // Strategy 1: Wait for main page navigation (5 seconds max)
+        // Strategy 1: Wait for main page navigation
         try {
-            await Promise.race([
-                state.page.waitForLoadState('networkidle', { timeout: 5000 }),
-                new Promise(resolve => setTimeout(resolve, 5000))
-            ]).catch(() => {});
+            await state.page.waitForLoadState('networkidle', { timeout: Math.min(timeout, 15000) }).catch(() => {});
         } catch (e) {
             // Continue with other checks
         }
 
-        // Check elapsed time
-        if (Date.now() - startTime > timeout) return false;
-
-        // Strategy 2: Quick DOM readiness check (3 seconds max)
+        // Strategy 2: Wait for all frames to be ready
         try {
-            await Promise.race([
-                state.page.evaluate(() => {
-                    return new Promise<void>((resolve) => {
-                        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                            resolve();
-                        } else {
-                            const handler = () => {
-                                document.removeEventListener('DOMContentLoaded', handler);
-                                resolve();
-                            };
-                            document.addEventListener('DOMContentLoaded', handler);
-                            setTimeout(() => resolve(), 3000);
-                        }
-                    });
-                }),
-                new Promise(resolve => setTimeout(resolve, 3000))
-            ]).catch(() => {});
+            const frames = state.page.frames();
+            for (const frame of frames) {
+                try {
+                    await frame.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+                } catch (e) {
+                    // Frame might be cross-origin, continue
+                }
+            }
         } catch (e) {
-            // DOM check skipped
+            // Frame checks completed
         }
 
-        // Check elapsed time
-        if (Date.now() - startTime > timeout) return false;
-
-        // Strategy 3: Wait for loading indicators to disappear (2 seconds max)
+        // Strategy 3: Wait for common loading indicators to disappear
         try {
             const loadingIndicators = await state.page.evaluate(() => {
                 const indicators = document.querySelectorAll(
@@ -1709,54 +1919,144 @@ async function waitForPageReady(timeout: number = 30000): Promise<boolean> {
                     '[data-testid*="loading"], [aria-busy="true"], .loader, .load, .progress'
                 );
                 return indicators.length;
-            }).catch(() => 0);
+            });
 
             if (loadingIndicators > 0) {
-                await Promise.race([
-                    state.page.evaluate(() => {
-                        return new Promise<boolean>((resolve) => {
-                            const checkIndicators = () => {
-                                const indicators = document.querySelectorAll(
-                                    '[class*="loading"], [class*="spinner"], [id*="loading"], [id*="spinner"], ' +
-                                    '[data-testid*="loading"], [aria-busy="true"], .loader, .load, .progress'
-                                );
-                                return indicators.length === 0;
-                            };
+                await state.page.evaluate(() => {
+                    return new Promise<boolean>((resolve) => {
+                        const checkIndicators = () => {
+                            const indicators = document.querySelectorAll(
+                                '[class*="loading"], [class*="spinner"], [id*="loading"], [id*="spinner"], ' +
+                                '[data-testid*="loading"], [aria-busy="true"], .loader, .load, .progress'
+                            );
+                            return indicators.length === 0;
+                        };
 
+                        if (checkIndicators()) {
+                            resolve(true);
+                            return;
+                        }
+
+                        const observer = new MutationObserver(() => {
                             if (checkIndicators()) {
-                                resolve(true);
-                                return;
-                            }
-
-                            const observer = new MutationObserver(() => {
-                                if (checkIndicators()) {
-                                    observer.disconnect();
-                                    resolve(true);
-                                }
-                            });
-
-                            observer.observe(document.body, {
-                                childList: true,
-                                subtree: true,
-                                attributes: true
-                            });
-
-                            // Timeout after 2 seconds
-                            setTimeout(() => {
                                 observer.disconnect();
-                                resolve(false);
-                            }, 2000);
+                                resolve(true);
+                            }
                         });
-                    }),
-                    new Promise(resolve => setTimeout(resolve, 2000))
-                ]).catch(() => {});
+
+                        observer.observe(document.body, {
+                            childList: true,
+                            subtree: true,
+                            attributes: true
+                        });
+
+                        // Timeout after 8 seconds
+                        setTimeout(() => {
+                            observer.disconnect();
+                            resolve(false);
+                        }, 8000);
+                    });
+                });
             }
         } catch (e) {
             // Loading indicator check skipped
         }
 
+        // Strategy 4: Wait for DOM to be interactive
+        try {
+            await state.page.evaluate(() => {
+                return new Promise<void>((resolve) => {
+                    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                        resolve();
+                    } else {
+                        document.addEventListener('DOMContentLoaded', () => resolve());
+                        setTimeout(() => resolve(), 3000);
+                    }
+                });
+            });
+        } catch (e) {
+            // DOM check skipped
+        }
+
+        // Strategy 5: Wait for network to settle (no requests for 2 seconds)
+        try {
+            let pendingRequests = true;
+            let settledCount = 0;
+
+            while (pendingRequests && Date.now() - startTime < timeout) {
+                try {
+                    const requestCount = await state.page.evaluate(() => {
+                        return (performance as any).getEntriesByType?.('resource')?.length || 0;
+                    });
+
+                    if (requestCount === 0 || settledCount > 3) {
+                        pendingRequests = false;
+                    } else {
+                        settledCount++;
+                        await state.page.waitForTimeout(500);
+                    }
+                } catch (e) {
+                    pendingRequests = false;
+                }
+            }
+        } catch (e) {
+            // Network settle check skipped
+        }
+
+        // Strategy 6: Wait for all AJAX/Fetch requests to complete
+        try {
+            await state.page.evaluate(() => {
+                return new Promise<void>((resolve) => {
+                    let requestCount = 0;
+                    const originalFetch = window.fetch;
+                    const originalXHR = (window as any).XMLHttpRequest;
+
+                    // Track fetch requests
+                    (window as any).fetch = function(...args: any[]) {
+                        requestCount++;
+                        return originalFetch.apply(this, args).finally(() => {
+                            requestCount--;
+                            if (requestCount === 0) {
+                                setTimeout(() => resolve(), 500);
+                            }
+                        });
+                    };
+
+                    // Check if requests are already in flight
+                    setTimeout(() => {
+                        if (requestCount === 0) {
+                            resolve();
+                        }
+                    }, 500);
+
+                    // Timeout after 8 seconds
+                    setTimeout(() => resolve(), 8000);
+                });
+            }).catch(() => {});
+        } catch (e) {
+            // AJAX check skipped
+        }
+
+        // Strategy 7: Final stability check
+        try {
+            const isStable = await state.page.evaluate(() => {
+                // Check if page has interactive elements visible
+                const interactiveElements = document.querySelectorAll(
+                    'button, input, a, select, textarea, [role="button"]'
+                );
+                return interactiveElements.length > 0 && document.readyState !== 'loading';
+            });
+        } catch (e) {
+            // Stability check skipped
+        }
+
+        const totalWaitTime = Date.now() - startTime;
+        if (totalWaitTime > 5000) {
+            log(`[Page Ready] Wait time: ${totalWaitTime}ms`);
+        }
         return true;
-    } catch (e) {
+
+    } catch (error: any) {
         return false;
     }
 }
@@ -1766,11 +2066,8 @@ async function waitForPageReady(timeout: number = 30000): Promise<boolean> {
  */
 async function executeWithPageReady(actionFn: () => Promise<any>, stepName: string): Promise<any> {
     try {
-        // Wait for page readiness with shorter timeout (10 seconds) - don't block indefinitely
-        // Even if page isn't "ready", we should still try the action
-        await waitForPageReady(10000).catch(() => {
-            log(`[${stepName}] Page readiness check timed out, proceeding anyway...`);
-        });
+        // Always wait for page readiness
+        const isReady = await waitForPageReady(30000);
 
         // Add small delay to ensure rendering
         await state.page?.waitForTimeout(300);
