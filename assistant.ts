@@ -1016,7 +1016,10 @@ async function advancedElementSearch(target: string, action: 'click' | 'fill', f
 }
 
 async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
-    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    // FIRST: Ensure page is fully loaded before attempting to find elements
+    await waitForPageReady();
+
+    // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
     const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
     if (advancedResult) {
         return true;
@@ -1258,7 +1261,10 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
 }
 
 async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
-    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    // FIRST: Ensure page is fully loaded before attempting to find elements
+    await waitForPageReady();
+
+    // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
     const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
     if (advancedResult) {
         return true;
