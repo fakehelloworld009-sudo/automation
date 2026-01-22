@@ -1,0 +1,5 @@
+node_modules/
+RESULTS/
+temp_uploads/
+temp_working_version.*
+*.xlsx
