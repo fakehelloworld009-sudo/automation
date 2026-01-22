@@ -1,0 +1,722 @@
+<!DOCTYPE html><html class="loginHtml" lang="en" style="display: block;"><head>
+		<meta http-equiv="X-UA-Compatible" content="IE=edge"> 
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <meta http-equiv="Content-Language" content="en">
+        <meta http-equiv="cache-control" content="no-cache">
+        <meta http-equiv="Pragma" content="no-cache">
+        <meta http-equiv="Expires" content="0">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><!--HTML5 Changes-->
+		 <link rel="SHORTCUT ICON" href="data:;base64,="><!-- citi ui change-->
+        <link href="Theme/ExtFlexblue.css" rel="stylesheet" type="text/css">
+        <link href="Theme/ExtFlexNewUI.css" rel="stylesheet" type="text/css"><!--HTML5 Changes-->
+        <link href="Theme/Exten.css" rel="stylesheet" type="text/css">
+        <link href="Theme/ExtBROWSER_GO.css" rel="stylesheet" type="text/css">
+        <!--HTML5 Changes Start-->
+        <!--<style type="text/css">
+                html {
+                    display: none
+                }
+            </style>--><!--HTML5 Changes End-->
+        <!--HTML5 Changes Start-->
+        <style type="text/css">
+                html {
+                    display: none
+                }
+            </style><!--HTML5 Changes End-->
+        
+        <title>
+            Oracle Financial Services
+        </title>
+        
+        
+        <script type="text/javascript" src="Script/JS/BROWSER_NonIE.js"></script>
+    </head>
+    <body class="loginBody" onkeydown="windowCtrl(event)" oncontextmenu="return false;" onunload="doUnload()"><noscript>
+        Script\x20Label
+    </noscript>
+    
+    <script type="text/javascript" src="Script/JS/Alert.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript" src="Script/JS/SmmdiFrm.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    
+    <script type="text/javascript" src="Script/JS/TaskList.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    
+    <script type="text/javascript" src="Script/JS/CcyDenomUtil.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript" src="Script/JS/GlobalConstants.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript" src="Script/ExtJS/ExtUIUtil.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript" src="Script/JS/SmhTlBar.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    
+    
+    
+    <script type="text/javascript" src="Script/JS/UserAlerts.js"></script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript">
+      function setHeights() {
+          var x, y;
+          if (self.innerHeight) {
+              x = self.innerWidth;
+              y = self.innerHeight;
+          }
+          else if (document.documentElement && document.documentElement.clientHeight) {
+              x = document.documentElement.clientWidth;
+              y = document.documentElement.clientHeight;
+          }
+          else if (document.body) {
+              x = document.body.clientWidth;
+              y = document.body.clientHeight;
+          }
+          // document.getElementById("centerdiv").style.marginTop = y/2 - ((document.getElementById("centerdiv").offsetHeight)/2)-59+"px";
+          document.getElementById("header").style.width = x + "px";/* Zooming Changes */
+          document.getElementById("footer").style.width = x + "px";/* Zooming Changes */
+          document.getElementById("footer").style.top = y - ((document.getElementById("footer").offsetHeight)) - 3 + "px";/* Zooming Changes */
+          document.getElementById("loginWrapper").style.top = y * 0.41 + "px";/* Zooming Changes */
+          document.getElementById("loginWrapper").style.width = x + "px";/* Zooming Changes */
+          document.body.style.minWidth = x + "px";/* Zooming Changes */
+          document.body.style.minHeight = y + "px";/*Zooming Changes */
+      }
+    </script>
+    <script type="text/javascript">
+        if (top == self) {
+            document.documentElement.style.display = "block";
+        } else {
+            top.location.href = "welcome.jsp";
+        }
+        window.statusbar = 0;
+        window.toolbar = 0;
+        window.resizeTo(screen.availWidth, screen.availHeight);
+        var uidMsg = 'User\x20Id\x20Cannot\x20be\x20Blank';
+        var pwdMsg = 'Password\x20Cannot\x20be\x20Blank';
+        var entMsg = 'null';
+        var loginProperChannel = 'Please\x20Login\x20through\x20Proper\x20Channel';
+        var isForceClose = true;
+        var isErrChk = false;
+        var isMFAErrChk = false;
+        var chgPwd = false;
+        var displayNoticeErorCode = 'Y';
+        var displayLegalNotice = 'N';
+        var legalNotice = '';
+        var alertXML = "";
+        var err_code = 'null';
+        var strTheme = 'Flexblue.css';
+        /*R4Citi MFA changes start */
+        var mfaEnabled = 'null';
+        var mfaId = '';
+        /*R4Citi MFA changes end */
+        var multiEntity = 'N';
+        var isValidSession = 'null'; //9NT1606_14_1_RETRO_12_3_28114454 
+        var reqEnc_Reqd =  'N'; // Login Encryption Changes
+        var legalNoticeArray = new Array();
+                    
+        function setLegalNoticeDet(entity, legalNoticeReqd, displayNotice) {
+            legalNoticeArray[entity] = new Object();
+            legalNoticeArray[entity].legalNoticeReqd = legalNoticeReqd;
+            //legalNoticeArray[entity].legalNotice = legalNotice;
+            legalNoticeArray[entity].displayNotice = displayNotice;
+        }
+        function getLegalNoticeDet(entity) {
+            return legalNoticeArray[entity];
+        }
+        function showLegalNotice(obj) {
+            if (obj.value != "") {
+                var legalNoticeDet = getLegalNoticeDet(obj.value);
+                if (displayNoticeErorCode == 'Y') {
+                    if (legalNoticeDet.legalNoticeReqd != 'N' && legalNoticeDet.legalNoticeReqd != 'null') {
+                        alertLegalNotice(legalNoticeDet.displayNotice);
+                    }
+                }
+            }
+        }
+        function alertLegalNotice(message) {
+            var labelDesc = "";
+            var attr = "I";
+            var alertMsgXML = fnBuildAlertXML('', attr, message);
+            mask();
+            showAlerts(alertMsgXML, attr);
+        }
+        function fnEnableScreen() {
+            document.getElementById("LOGINUSERID").disabled = false; /* HTML5 Changes 6/OCT/2016 */
+            document.getElementById("user_pwd").disabled = false;
+            document.getElementById("fc_sbmit").disabled = false;
+            var errVal = document.getElementById("errors").value;
+            if (errVal == "" || errVal == "null" || errVal == null) {
+                document.getElementById("LOGINUSERID").focus(); /* HTML5 Changes 6/OCT/2016 */
+            }
+            if ('N' == "Y") {
+                document.getElementById("LOGINUSERID").disabled = true; /* HTML5 Changes 6/OCT/2016 */
+                document.getElementById("user_pwd").disabled = true;
+            }
+        }
+        function CheckUser() {
+            var SSO_REQ = 'N';
+            
+            if (SSO_REQ == "Y") {
+                document.getElementById("LOGINUSERID").value = 'null'; /* HTML5 Changes 6/OCT/2016 */
+            }
+            
+            if (document.getElementById("LOGINUSERID").value == "") { /* HTML5 Changes 6/OCT/2016 */
+                alertXML = fnBuildAlertXML('', 'I', uidMsg);
+                mask();
+                showAlerts(alertXML, 'I');
+                document.getElementById("LOGINUSERID").focus(); /* HTML5 Changes 6/OCT/2016 */
+                return false;
+            } else if (document.getElementById("user_pwd").value == "" && SSO_REQ != "Y") {
+                alertXML = fnBuildAlertXML('', 'I', pwdMsg);
+                mask();
+                showAlerts(alertXML, 'I');
+                document.getElementById("user_pwd").focus();
+                return false;
+            } else if(multiEntity == "Y" && document.getElementById("IDENT").value == "") {
+                alertXML = fnBuildAlertXML('', 'I', entMsg);
+                mask();
+                showAlerts(alertXML, 'I');
+                document.getElementById("IDENT").focus();
+                return false;
+            } else {
+                selCSS = document.getElementById("IDCSS");
+                document.getElementById("LOGINUSERID").value = document.getElementById("LOGINUSERID").value.toUpperCase(); /* HTML5 Changes 6/OCT/2016 */
+                var userId = document.getElementById("LOGINUSERID").value; /* HTML5 Changes 6/OCT/2016 */
+                var password = document.getElementById("user_pwd").value;
+                document.getElementById("hdUserId").value = userId;
+                document.getElementById("hdPassword").value = password;
+                // Login Encryption Changes
+                if(reqEnc_Reqd == "Y")
+                document.getElementById("hdPassword").value = AESEncrypt(password); 
+                //document.getElementById("theme").value = document.getElementById("IDCSS").value;//HTML5 Changes
+                document.getElementById("user_pwd").value = "";
+                document.getElementById("user_pwd").disabled = true;
+                document.getElementById("logUser").value = userId;
+                document.getElementById("errors").value="";//CPU_JAN17_D_25214120
+                if (multiEntity == "Y") {
+                  document.getElementById("hdEntity").value = document.getElementById("IDENT").value;
+                }
+                document.getElementById("font").value = selectedFont;//HTML5 Changes //HTML5 Changes 6/OCT/2016 
+                document.getElementById("logintheme").value = selectedTheme;//HTML5 Changes //HTML5 Changes 6/OCT/2016 
+                if (typeof(Storage) !== "undefined") {
+                    localStorage.logintheme = selectedTheme;//HTML5 Changes //HTML5 Changes 6/OCT/2016
+                    localStorage.loginfont = selectedFont;//HTML5 Changes //HTML5 Changes 6/OCT/2016
+                }
+                isForceClose = false;
+                //document.forms[0].submit();
+            }
+        }
+
+        function CheckUserForSSLEnabled() {
+            var SSO_REQ = 'N';
+            if (SSO_REQ == "Y") {
+                document.getElementById("LOGINUSERID").value = 'null'; /* HTML5 Changes 6/OCT/2016 */
+            }
+            if (document.getElementById("LOGINUSERID").value == "") { /* HTML5 Changes 6/OCT/2016 */
+                alertXML = fnBuildAlertXML('', 'I', uidMsg);
+                showAlerts(alertXML, 'I');
+                document.getElementById("LOGINUSERID").focus(); /* HTML5 Changes 6/OCT/2016 */
+            } else if (document.getElementById("user_pwd").value == "" && SSO_REQ != "Y") {
+                alertXML = fnBuildAlertXML('', 'I', pwdMsg);
+                showAlerts(alertXML, 'I');
+                document.getElementById("user_pwd").focus();
+            } else if(multiEntity == "Y" && document.getElementById("IDENT").value == "") {
+                alertXML = fnBuildAlertXML('', 'I', entMsg);
+                mask();
+                showAlerts(alertXML, 'I');
+                document.getElementById("IDENT").focus();
+                return false;
+            } else {
+                selCSS = document.getElementById("IDCSS");
+                document.getElementById("LOGINUSERID").value = document.getElementById("LOGINUSERID").value.toUpperCase(); /* HTML5 Changes 6/OCT/2016 */
+                document.getElementById("user_pwd").value = document.getElementById("user_pwd").value;// Ashok -- Password is  case sensitive.
+                var userId = document.getElementById("LOGINUSERID").value; /* HTML5 Changes 6/OCT/2016 */
+                var password = document.getElementById("user_pwd").value;
+                
+                document.getElementById("hdUserId").value = userId;
+                document.getElementById("hdPassword").value = password;
+                // Login Encryption Changes
+                if(reqEnc_Reqd == "Y")
+                document.getElementById("hdPassword").value = AESEncrypt(password); 
+                //document.getElementById("theme").value = document.getElementById("IDCSS").value;//HTML5 Changes
+                document.getElementById("user_pwd").value = "";
+                document.getElementById("user_pwd").disabled = true;
+                document.getElementById("logUser").value = userId;
+                document.getElementById("errors").value="";//CPU_JAN17_D_25214120
+                if (multiEntity == "Y") {
+                    document.getElementById("hdEntity").value = document.getElementById("IDENT").value;
+                }
+                document.getElementById("font").value = selectedFont;//HTML5 Changes //HTML5 Changes 6/OCT/2016 
+                document.getElementById("logintheme").value = selectedTheme;//HTML5 Changes //HTML5 Changes 6/OCT/2016 
+                if (typeof(Storage) !== "undefined") {
+                    localStorage.logintheme = selectedTheme;//HTML5 Changes //HTML5 Changes 6/OCT/2016
+                    localStorage.loginfont = selectedFont;//HTML5 Changes //HTML5 Changes 6/OCT/2016
+                }
+                isForceClose = false;
+            }
+        }
+        var objTimer, intCount = 0;
+
+        function checkErr() {
+            window.focus();
+            var err = document.getElementById("errors").value;
+            var err_code = document.getElementById("err_code").value;
+            var SSO_REQ = 'N';
+            if (multiEntity == 'Y') {
+                showLegalNotice(document.getElementById("IDENT"));
+            } else {
+                if (displayNoticeErorCode == 'Y') {
+                    if (displayLegalNotice != 'N' && displayLegalNotice != 'null') {
+                        alertLegalNotice(legalNotice);
+                    }
+                }
+            }
+            if (window.name != "LoginWindow" && SSO_REQ == "Y") {
+                alertXML = fnBuildAlertXML('', 'I', loginProperChannel);
+                mask();
+                showAlerts(alertXML, 'I');
+                document.getElementById("LOGINUSERID").disabled = true; /* HTML5 Changes 6/OCT/2016 */
+                document.getElementById("user_pwd").disabled = true;
+                document.getElementById("IDCSS").disabled = true;
+                document.getElementById("fc_sbmit").disabled = true;
+                return;
+            }
+            fnEnableScreen();
+            if (err == "" || err == "null" || err == null) {
+                return;
+            } else {
+                var msgArr = fnBuildMsgArr(err);
+                for (var i in msgArr) {
+                    err_code = i + "~";
+                    err = msgArr[i] + "~";
+                }
+                err_code = err_code.substring(0, err_code.length - 1);
+                err = err.substring(0, err.length - 1);
+                var alertXML = fnBuildAlertXML(err_code, 'E', err);
+                mask();
+                if (err_code == "SM-7008")
+                    showAlerts(alertXML, 'I');
+                else if(err_code == "SM-00212") { //Auto Clear User Changes Start
+                    showAlerts(alertXML,"C");
+                }
+                else if(err_code=="SM-00213"){
+                    showAlerts(alertXML, 'E');
+                }//Auto Clear User Changes End
+                else
+                    showAlerts(alertXML, 'E');
+                isErrChk = false;//R4Citi MFA change
+                isMFAErrChk = true;
+                if(err_code == "SM-MFA02" || err_code == "SM-MFA03"){
+                    isForceClose = true;
+                }
+            }
+        }
+        function reqSignOff() {
+            var strFormData = "userId=userId";
+            var objHTTP = createHTTPActiveXObject();
+            objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
+            objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            objHTTP.setRequestHeader("X-CSRFTOKEN", '92FC3CF5A114C95FDDDB769FB7D3D0953ECEF7235A31B0B2748B3FDC74C32206');
+            objHTTP.send(strFormData);
+            if (objHTTP.status == 200) {
+                var responseXML = objHTTP.responseXML;
+                return responseXML;
+            }
+        }
+        function windowCtrl(e) {
+            var event = window.event || e;
+            if (event.ctrlKey == true || event.keyCode == 112 || event.keyCode == 116) { //Fix for 18921364
+                switch (event.keyCode) {
+                    case 66:
+                    //B = Organize Favourities in IE
+                    case 68:
+                    //D = Add a Favouritie in IE
+                    case 69:
+                    //E = Search Web in IE
+                    case 70:
+                    //F = Find in IE
+                    case 72:
+                    //H = History in IE
+                    case 73:
+                    //I = Manage Favourities in IE
+                    case 74:
+                    //J = Manage Feeds in IE
+                    case 76:
+                    //L = Open in IE
+                    case 78:
+                    //N = Open in IE
+                    case 79:
+                    //O = Open in IE
+                    case 80:
+                    //P = Print in IE
+                    case 82:
+                    //R = Refresh in IE
+                    case 87:
+                    //W = Close window in IE
+                    case 112:
+                    //F1 = Help
+                    case 116:
+                    //F5 = Refresh
+                        fnDisableBrowserKey(event);
+                        preventpropagate(event);
+                        try {
+                            event.keyCode = 0;
+                        }catch (e) {
+                        }
+                        return false;
+                }
+            }
+            if (event.keyCode == 8) {
+                var srcEle = getEventSourceElement(event);
+                if (srcEle.id == "" || srcEle.id == "IDCSS") {
+                    event.returnValue = false;
+                    return false;
+                }
+            }
+        }
+
+      function doUnload() {
+          if (isForceClose && !isErrChk && isValidSession != 'Y') { //9NT1606_14_1_RETRO_12_3_28114454 
+              var strFormData = "userId=userId";
+              var objHTTP = createHTTPActiveXObject();
+              objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
+              objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+              objHTTP.setRequestHeader("X-CSRFTOKEN", '92FC3CF5A114C95FDDDB769FB7D3D0953ECEF7235A31B0B2748B3FDC74C32206');
+              objHTTP.send(strFormData);
+              if (objHTTP.status == 200) {
+                  var responseXML = objHTTP.responseXML;
+              }
+          }
+          isErrChk = false;
+      }
+      //Auto Clear User Changes Start
+    function fnLoadClrUsr(){
+        var alertWindow = document.getElementById("ifr_AlertWin");
+        if(alertWindow==null){
+            alertWindow = parent.document.getElementById("ifr_AlertWin");
+            strTheme = parent.window.strTheme;
+        }
+        alertWindow.src = encodeURI("AUTOCLRUSR.jsp?THEME=" + strTheme);
+        var alertWinObj = document.getElementById("Div_AlertWin");
+        if(alertWinObj == null) {
+            alertWinObj = parent.document.getElementById("Div_AlertWin");
+        }
+        alertWinObj.style.display = "block";
+    }
+    //Auto Clear User Changes End
+      function fnLoginUnloadAlert() {
+		  /*9NT1606_12_2_RETRO_11_3_23656224*/
+				if(gAlertMessage.indexOf("SM-00420") != -1){
+                    window.open('','_self').close();
+                }
+		 /*9NT1606_12_2_RETRO_11_3_23656224 Ends*/
+                 var err_msg=' null'; //Auto Clear User Changes
+          if (err_code == 'SM-7008' && chgPwd == false) {
+              mask();
+              document.getElementById("Div_AlertWin").style.display = "block";
+              document.getElementById("ifr_AlertWin").src = "SMCHGPWD.jsp?THEME=" + strTheme + "&FROMLOGIN=true";
+              return;
+          } else if(err_msg.substring(48,56)=='SM-00212' || err_code.substring(0, err_code.length - 1)=='SM-00213') { //Auto Clear User Changes Start
+                fnLoadClrUsr();
+                isForceClose = false;
+                return;
+          }//Auto Clear User Changes End
+          /*Citi R4 MFA change start*/
+          else if(alertAction == 'MFALOGIN' || err_code == 'SM-MFA03'){
+            if(alertAction == 'MFALOGIN')
+              fnUpdateMfaLog(mfaId);
+            isForceClose = false;
+            window.location.href="SMMDIFRM.jsp"; 
+            return;
+          }else if(err_code == 'SM-MFA02' || err_code == 'SM-MFA06'){
+            mask();
+            document.getElementById("Div_AlertWin").style.display = "block";
+            document.getElementById("ifr_AlertWin").src="MFALOGIN.jsp";
+            return;
+          }else if(alertAction == 'MFAPINBLANK'){// Fix for 21254555
+            mask();
+            document.getElementById("Div_AlertWin").style.display = "block";
+            document.getElementById("ifr_AlertWin").src="MFALOGIN.jsp";
+            return;
+          }/*Citi R4 MFA change end*/
+          unmask();
+          if (err_code == 'SM-7008' || (document.getElementById("errors").value != "" && document.getElementById("errors").value.indexOf("SM-00420")!= -1) || err_code =='SM-MFA04' || err_code =='SM-MFA08') { // Modified for new hook // FCUBS_12.3_RETRO_22749639
+              reqSignOff();
+              location.href = "LoginServlet";
+          } //20900859  
+          document.getElementById("LOGINUSERID").focus(); /* HTML5 Changes 6/OCT/2016 */
+      }
+
+      function debugs(msg, value, funcName) {
+      }
+    </script>
+    <noscript>
+        Script\x20Label
+    </noscript>
+    <script type="text/javascript">
+    function initOverLabels() {
+          if (!document.getElementById)
+              return;
+
+          var labels, id, field;
+
+          // Set focus and blur handlers to hide and show 
+          // LABELs with 'overlabel' class names.
+          labels = document.getElementsByTagName('label');
+          for (var i = 0;i < labels.length;i++) {
+
+              if (labels[i].className == 'overlabel') {
+
+                  // Skip labels that do not have a named association
+                  // with another field.
+                  id = labels[i].htmlFor || labels[i].getAttribute('for');
+                  if (!id || !(field = document.getElementById(id))) {
+                      continue;
+                  }
+
+                  // Change the applied class to hover the label 
+                  // over the form field.
+                  labels[i].className = 'overlabel-apply';
+
+                  // Hide any fields having an initial value.
+                  if (field.value != '') {
+                      hideLabel(field.getAttribute('id'), true);
+                  }
+
+                  // Set handlers to show and hide labels.
+                  field.onfocus = function () {
+                      hideLabel(this.getAttribute('id'), true);
+                  };
+                  field.onblur = function () {
+                      if (this.value == '') {
+                          hideLabel(this.getAttribute('id'), false);
+                      }
+                  };
+                  field.onkeydown = function () {
+                      if (this.value == '') {
+                          hideLabel(this.getAttribute('id'), true);
+                      }
+                  };
+
+                  // Handle clicks to LABEL elements (for Safari).
+                  labels[i].onclick = function () {
+                      var id, field;
+                      id = this.getAttribute('for');
+                      if (id && (field = document.getElementById(id))) {
+                          field.focus();
+                      }
+                  };
+
+              }
+          }
+      };
+
+      function hideLabel(field_id, hide) {
+          var field_for;
+          var labels = document.getElementsByTagName('label');
+          for (var i = 0;i < labels.length;i++) {
+              field_for = labels[i].htmlFor || labels[i].getAttribute('for');
+              if (field_for == field_id) {
+                  //labels[i].style.textIndent = (hide) ? '-1800px' : '0px';
+                  //Fix for 17252121 
+                  labels[i].className = (hide) ? 'overlabel-apply move' : 'overlabel-apply';//HTML5 Changes
+                  return true;
+              }
+          }
+      }
+      
+/*R4Citi MFA change start */
+function checkMFAEnabled(){
+  if(typeof(mfaEnabled) != 'undefined' && mfaEnabled == 'Y' && isMFAErrChk != true){
+      mask();
+      document.getElementById("Div_AlertWin").style.display = "block";
+      document.getElementById("ifr_AlertWin").src="MFALOGIN.jsp";
+      isForceClose = false;// Fix for 21254555,21455468 
+  }
+}
+      
+function fnExitAlertWin(){
+    if(alertAction == 'MFALOGIN'){
+        mask();
+        document.getElementById("Div_AlertWin").style.display = "block";
+        document.getElementById("ifr_AlertWin").src="MFALOGIN.jsp";
+        return;
+    } else { //Auto Clear User Changes
+        unmask(); 
+    }
+}
+   
+
+function fnUpdateMfaLog(mfaId) {
+    objHTTP = createHTTPActiveXObject();
+    objHTTP.open("POST", "MFALoginValidateServlet?actionType=skipLogin&hdMfaId="+mfaId, true);
+    objHTTP.setRequestHeader("Content-Type", "application/xml");
+    objHTTP.setRequestHeader("charset", "utf-8");
+    objHTTP.setRequestHeader("X-CSRFTOKEN", '92FC3CF5A114C95FDDDB769FB7D3D0953ECEF7235A31B0B2748B3FDC74C32206');
+    objHTTP.send(null);
+    
+}
+/*R4 Citi MFA change end */
+//HTML5 Changes 6/OCT/2016 start
+function switchFont(obj, evnt) {
+    var ulElem = obj.parentNode;
+    for (var i=0;i<ulElem.children.length;i++) {
+        ulElem.children[i].className = "";
+    }
+    obj.className = "selectedFont";
+    selectedFont = obj.children[0].getAttribute("fontvalue");
+}
+
+function switchTheme(obj, evnt) {
+    var ulElem = obj.parentNode;
+    for (var i=0;i<ulElem.children.length;i++) {
+        ulElem.children[i].className = "";
+    }
+    obj.className = "selectedTheme";
+    selectedTheme = obj.children[0].getAttribute("themevalue");
+}
+//HTML5 Changes 6/OCT/2016 end
+    window.onload = function () {
+        setTimeout(initOverLabels, 50);
+        checkErr();
+        setTimeout(setHeights, 50);
+        checkMFAEnabled(); //R4Citi MFA change
+        //HTML5 Changes 6/OCT/2016 start
+        selectedFont = "M";
+        selectedTheme = "L";
+        if (typeof(Storage) !== "undefined") {
+            if (localStorage.logintheme) {
+                selectedTheme = localStorage.logintheme;
+                var themeLI = document.getElementById("themeUL").children;
+                for (var i=0;i<themeLI.length;i++) {
+                    if (selectedTheme == themeLI[i].children[0].getAttribute("themevalue")) {
+                        themeLI[i].className = "selectedTheme";
+                    } else {
+                        themeLI[i].className = "";
+                    }
+                }
+            }
+            if (localStorage.loginfont) {
+                selectedFont = localStorage.loginfont;
+                var fontLI = document.getElementById("fontUL").children;
+                for (var i=0;i<fontLI.length;i++) {
+                    if (selectedFont == fontLI[i].children[0].getAttribute("fontvalue")) {
+                        fontLI[i].className = "selectedFont";
+                    } else {
+                        fontLI[i].className = "";
+                    }
+                }
+            }
+        }//HTML5 Changes 6/OCT/2016 end
+    };
+    </script>
+    
+        <!--HTML5 Changes Start-->
+        <div class="header"><!--HTML5 Changes 6/OCT/2016 start-->
+            <span class="oracle_tp"></span>
+            <span class="rightContainer">
+                <span class="fonts">
+                    <ul id="fontUL">
+                        <li><span class="rTitle">Font Size:</span></li>
+                        <li onclick="switchFont(this, event)"><span class="sFont" fontvalue="S">A</span></li>
+                        <li class="selectedFont" onclick="switchFont(this, event)"><span class="mFont" fontvalue="M">A</span></li>
+                        <li onclick="switchFont(this, event)"><span class="lFont" fontvalue="L">A</span></li>
+                    </ul>
+                </span>
+                <span class="themes">
+                    <ul id="themeUL">
+                        <li><span class="rTitle">Theme:</span></li>
+                        <li onclick="switchTheme(this, event)" class="selectedTheme"><span class="CadetGreen" themevalue="L"></span>Cadet Green</li>
+                        <li onclick="switchTheme(this, event)"><span class="GlaucouDark" themevalue="C"></span>Glaucous Dark</li>
+                        <li onclick="switchTheme(this, event)"><span class="Sephia" themevalue="D"></span>Sepia</li>
+                    </ul>
+                </span>
+            </span>
+        </div><!--HTML5 Changes 6/OCT/2016 end-->
+        <div class="loginCont">
+        <!-- //Bug#24908374 LOGIN Label Changes Start //-->
+            <div class="redPatch"><span></span>
+         <!--//Bug#24908374 LOGIN Label Changes Ends //-->
+                <span class="lshadow"></span><!--HTML5 Changes 6/OCT/2016 -->
+                <span class="rshadow"></span><!--HTML5 Changes 6/OCT/2016 -->
+            </div>
+            <form class="login" method="POST" action="LoginValidateServlet?msgType=NONWORKFLOW&amp;actionType=login" name="frmLogin" onsubmit="return CheckUser()" autocomplete="off">
+			<label class="LBLinv" for=""></label>
+            <input type="Hidden" name="X-CSRFTOKEN" value="92FC3CF5A114C95FDDDB769FB7D3D0953ECEF7235A31B0B2748B3FDC74C32206" style="">
+            <label class="LBLinv" for="hdUserId"></label>
+            <input id="hdUserId" type="hidden" name="hdUserId" value="" style="">
+            <label class="LBLinv" for="hdPassword"></label>
+            <input id="hdPassword" type="hidden" name="hdPassword" value="" style="">
+            <label class="LBLinv" for="hdEntity"></label>
+            <input id="hdEntity" type="hidden" name="hdEntity" value="" style="">
+            <label class="LBLinv" for="theme"></label>
+            <input id="theme" type="hidden" name="theme" value="" style="">
+            <label class="LBLinv" for="logUser"></label>
+            <input id="logUser" type="hidden" name="logUser" value="" style="">
+            <label class="LBLinv" for="logUser"></label>
+            <input type="hidden" id="DBGSTRING" name="DBGSTRING" value="" style="">
+            <label class="LBLinv" for="errors">
+                null
+            </label>
+            <input type="hidden" id="errors" name="errors" value="null" style="">
+            <label class="LBLinv" for="err_code">
+                null
+            </label>
+            <input type="hidden" id="err_code" name="err_code" value="null" style="">
+            <label class="LBLinv" for="font"></label><!--HTML5 Changes-->
+            <input id="font" type="hidden" name="font" value="M" style=""><!--HTML5 Changes-->
+            <label class="LBLinv" for="logintheme"></label><!--HTML5 Changes-->
+            <input id="logintheme" type="hidden" name="logintheme" value="L" style=""><!--HTML5 Changes-->
+            <div id="username" align="center">
+                <label for="LOGINUSERID" class="overlabel-apply">User ID</label><!--HTML5 Changes 6/OCT/2016 -->
+                
+                    <input id="LOGINUSERID" type="text" name="USERID" title="User ID" tabindex="0" size="15" maxlength="20" value="" style=""><!--HTML5 Changes-->
+                
+            </div>
+            <div id="password" align="center">
+                <label for="user_pwd" class="overlabel-apply">Password</label>
+                <input id="user_pwd" name="user_pwd" type="password" onpaste="return false;" title="Password" maxlength="35" size="15" tabindex="0" value="" style="">
+            </div>
+            <div class="inLDP">
+                
+            </div>
+            <div id="submit" class="loginSubmitBtn">
+                <input class="BTNtext" type="submit" name="submit" value="Sign In" id="fc_sbmit" tabindex="0" accesskey="l" style=""><!--HTML5 Changes-->
+            </div>
+            </form>
+        </div>
+        <div id="footer" class="loginFooter">
+                    
+                     
+                    
+                     
+                    <span class="loginCpyText">
+                        Copyright Â© 2017,2018, Oracle and/or its affiliates. All rights reserved. </span>
+                     
+                    
+                </div>
+                <div id="masker" class="masker" style="display:none">
+                    <div id="Div_AlertWin" class="showPopUp" style="position:absolute;display:none" onclose="fnLoginUnloadAlert()" oncancel="fnExitAlertWin()"><!--HTML5 Changes-->
+                        <iframe id="ifr_AlertWin" class="frames" src="" allowtransparency="true" frameborder="0" scrolling="no"></iframe>
+                    </div>
+                </div>
+            
+        
+		<!--HTML5 Changes End-->
+    
+</body></html>
