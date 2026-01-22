@@ -1056,7 +1056,10 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                     const rect = (el as HTMLElement).getBoundingClientRect();
                                     // Only consider elements that are actually visible
                                     if (rect.width > 0 && rect.height > 0) {
-                                        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        // ONLY scroll if element is outside viewport
+                                        if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                                            (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        }
                                         // DIRECTLY CLICK - don't just focus
                                         (el as HTMLElement).click();
                                         return true;
@@ -1076,13 +1079,19 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 // Modal strategy failed, continue
             }
 
-            // Strategy 1: Try direct selector with scroll
+            // Strategy 1: Try direct selector without scrolling first
             try {
-                await scrollToElement(target);
-                await state.page?.click(target, { timeout: 3000 });
+                await state.page?.click(target, { timeout: 1500 });
                 return true;
             } catch (e1) {
-                // Direct selector failed
+                // If not found, try with scroll as fallback
+                try {
+                    await scrollToElement(target);
+                    await state.page?.click(target, { timeout: 3000 });
+                    return true;
+                } catch (e1b) {
+                    // Direct selector failed
+                }
             }
 
             // Strategy 2: Find by text and click
@@ -1311,7 +1320,10 @@ async function fillWithRetry(target: string, value: string, maxRetries: number =
                              name.toLowerCase().includes(searchText.toLowerCase()))) {
                             const rect = el.getBoundingClientRect();
                             if (rect.width > 0 && rect.height > 0) {
-                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                // ONLY scroll if element is outside viewport
+                                if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
                                 (input as any).value = fillValue;
                                 input.dispatchEvent(new Event('input', { bubbles: true }));
                                 input.dispatchEvent(new Event('change', { bubbles: true }));
