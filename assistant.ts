@@ -392,7 +392,218 @@ async function scrollToElementByText(text: string): Promise<boolean> {
     }
 }
 
+/* ============== ENHANCED FRAME & DYNAMIC ELEMENT HANDLING ============== */
+
+/**
+ * Search and interact with elements across ALL frames (including cross-origin and nested)
+ * Using Playwright's Frame API which bypasses CORS restrictions
+ */
+async function searchInAllFrames(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        log(`[Advanced Frame Search] Searching all frames (including cross-origin & nested) for: ${target}`);
+        
+        // Get all frames in the page (includes cross-origin frames via Playwright API)
+        const frames = state.page.frames();
+        log(`Found ${frames.length} total frames to search`);
+
+        for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+            const frame = frames[frameIndex];
+            try {
+                // Wait for frame to be ready
+                await frame.waitForLoadState('domcontentloaded').catch(() => {});
+
+                if (action === 'click') {
+                    // Try clicking in this frame
+                    try {
+                        const elements = await frame.locator('*').all();
+                        for (const el of elements) {
+                            try {
+                                const text = await el.textContent();
+                                if (text?.toLowerCase().includes(target.toLowerCase())) {
+                                    const isVisible = await el.isVisible().catch(() => false);
+                                    if (isVisible) {
+                                        log(`Found clickable in frame ${frameIndex}: ${target}`);
+                                        await el.click().catch(() => {});
+                                        return true;
+                                    }
+                                }
+                            } catch (e) {
+                                // Skip element
+                            }
+                        }
+                    } catch (e) {
+                        log(`Click search in frame ${frameIndex} failed (may be cross-origin)`);
+                    }
+                } else if (action === 'fill' && fillValue) {
+                    // Try filling in this frame
+                    try {
+                        // Search for input/textarea elements
+                        const inputs = await frame.locator('input, textarea').all();
+                        for (const input of inputs) {
+                            try {
+                                const placeholder = await input.getAttribute('placeholder');
+                                const ariaLabel = await input.getAttribute('aria-label');
+                                const name = await input.getAttribute('name');
+                                const id = await input.getAttribute('id');
+                                
+                                const matches = 
+                                    placeholder?.toLowerCase().includes(target.toLowerCase()) ||
+                                    ariaLabel?.toLowerCase().includes(target.toLowerCase()) ||
+                                    name?.toLowerCase().includes(target.toLowerCase()) ||
+                                    id?.toLowerCase().includes(target.toLowerCase());
+
+                                if (matches) {
+                                    const isVisible = await input.isVisible().catch(() => false);
+                                    if (isVisible) {
+                                        log(`Found input in frame ${frameIndex}: ${target}`);
+                                        await input.fill(fillValue);
+                                        return true;
+                                    }
+                                }
+                            } catch (e) {
+                                // Skip input
+                            }
+                        }
+                    } catch (e) {
+                        log(`Fill search in frame ${frameIndex} failed (may be cross-origin)`);
+                    }
+                }
+            } catch (frameError: any) {
+                log(`Frame ${frameIndex} error: ${frameError.message?.substring(0, 50)}`);
+            }
+        }
+
+        return false;
+    } catch (error: any) {
+        log(`Frame search failed: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Wait for dynamically created elements to appear using MutationObserver
+ */
+async function waitForDynamicElement(target: string, timeout: number = 5000): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        log(`Waiting for dynamic element: ${target} (timeout: ${timeout}ms)`);
+        
+        const found = await state.page.evaluate(({ searchText, waitTime }) => {
+            return new Promise<boolean>((resolve) => {
+                // First check if element already exists
+                const checkElement = () => {
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        const text = (el.textContent || '').toLowerCase();
+                        const placeholder = (el as any).placeholder?.toLowerCase() || '';
+                        const ariaLabel = (el as any).getAttribute('aria-label')?.toLowerCase() || '';
+                        const name = (el as any).name?.toLowerCase() || '';
+                        const id = (el as any).id?.toLowerCase() || '';
+
+                        if (text.includes(searchText.toLowerCase()) ||
+                            placeholder.includes(searchText.toLowerCase()) ||
+                            ariaLabel.includes(searchText.toLowerCase()) ||
+                            name.includes(searchText.toLowerCase()) ||
+                            id.includes(searchText.toLowerCase())) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                if (checkElement()) {
+                    resolve(true);
+                    return;
+                }
+
+                // Set up MutationObserver to watch for new elements
+                const observer = new MutationObserver(() => {
+                    if (checkElement()) {
+                        observer.disconnect();
+                        resolve(true);
+                    }
+                });
+
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    characterData: true
+                });
+
+                // Timeout after specified time
+                setTimeout(() => {
+                    observer.disconnect();
+                    resolve(false);
+                }, waitTime);
+            });
+        }, { searchText: target, waitTime: timeout });
+
+        if (found) {
+            log(`Dynamic element found: ${target}`);
+            return true;
+        } else {
+            log(`Dynamic element NOT found after ${timeout}ms: ${target}`);
+            return false;
+        }
+    } catch (error: any) {
+        log(`Dynamic element wait failed: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Intelligently retry finding elements across frames and wait for dynamic elements
+ */
+async function advancedElementSearch(target: string, action: 'click' | 'fill', fillValue?: string, maxRetries: number = 3): Promise<boolean> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            log(`[Advanced Search Attempt ${attempt}/${maxRetries}] ${target}`);
+
+            // Step 1: Wait for dynamic element (in case it's being created)
+            const dynamicFound = await waitForDynamicElement(target, 2000);
+            if (dynamicFound) {
+                log(`Element detected as dynamic`);
+                // Try again now that it exists
+                if (action === 'click') {
+                    const clicked = await searchInAllFrames(target, 'click');
+                    if (clicked) return true;
+                } else {
+                    const filled = await searchInAllFrames(target, 'fill', fillValue);
+                    if (filled) return true;
+                }
+            }
+
+            // Step 2: Search across all frames (handles cross-origin and nested)
+            const frameResult = await searchInAllFrames(target, action, fillValue);
+            if (frameResult) return true;
+
+            // Step 3: If still not found, try old strategies as fallback
+            // (this ensures backward compatibility)
+
+            if (attempt < maxRetries) {
+                log(`Retrying in ${1000}ms...`);
+                await state.page?.waitForTimeout(1000);
+            }
+        } catch (error: any) {
+            log(`Advanced search attempt ${attempt} error: ${error.message}`);
+        }
+    }
+
+    return false;
+}
+
 async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
+    if (advancedResult) {
+        log(`SUCCESS: Found and clicked via advanced search`);
+        return true;
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Check if page is still valid before attempting
@@ -642,6 +853,13 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
 }
 
 async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
+    if (advancedResult) {
+        log(`SUCCESS: Found and filled via advanced search`);
+        return true;
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Check if page is still valid before attempting

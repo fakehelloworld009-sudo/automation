@@ -363,7 +363,208 @@ async function scrollToElementByText(text) {
         return false;
     }
 }
+/* ============== ENHANCED FRAME & DYNAMIC ELEMENT HANDLING ============== */
+/**
+ * Search and interact with elements across ALL frames (including cross-origin and nested)
+ * Using Playwright's Frame API which bypasses CORS restrictions
+ */
+async function searchInAllFrames(target, action, fillValue) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    try {
+        log(`[Advanced Frame Search] Searching all frames (including cross-origin & nested) for: ${target}`);
+        // Get all frames in the page (includes cross-origin frames via Playwright API)
+        const frames = state.page.frames();
+        log(`Found ${frames.length} total frames to search`);
+        for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+            const frame = frames[frameIndex];
+            try {
+                // Wait for frame to be ready
+                await frame.waitForLoadState('domcontentloaded').catch(() => { });
+                if (action === 'click') {
+                    // Try clicking in this frame
+                    try {
+                        const elements = await frame.locator('*').all();
+                        for (const el of elements) {
+                            try {
+                                const text = await el.textContent();
+                                if (text?.toLowerCase().includes(target.toLowerCase())) {
+                                    const isVisible = await el.isVisible().catch(() => false);
+                                    if (isVisible) {
+                                        log(`Found clickable in frame ${frameIndex}: ${target}`);
+                                        await el.click().catch(() => { });
+                                        return true;
+                                    }
+                                }
+                            }
+                            catch (e) {
+                                // Skip element
+                            }
+                        }
+                    }
+                    catch (e) {
+                        log(`Click search in frame ${frameIndex} failed (may be cross-origin)`);
+                    }
+                }
+                else if (action === 'fill' && fillValue) {
+                    // Try filling in this frame
+                    try {
+                        // Search for input/textarea elements
+                        const inputs = await frame.locator('input, textarea').all();
+                        for (const input of inputs) {
+                            try {
+                                const placeholder = await input.getAttribute('placeholder');
+                                const ariaLabel = await input.getAttribute('aria-label');
+                                const name = await input.getAttribute('name');
+                                const id = await input.getAttribute('id');
+                                const matches = placeholder?.toLowerCase().includes(target.toLowerCase()) ||
+                                    ariaLabel?.toLowerCase().includes(target.toLowerCase()) ||
+                                    name?.toLowerCase().includes(target.toLowerCase()) ||
+                                    id?.toLowerCase().includes(target.toLowerCase());
+                                if (matches) {
+                                    const isVisible = await input.isVisible().catch(() => false);
+                                    if (isVisible) {
+                                        log(`Found input in frame ${frameIndex}: ${target}`);
+                                        await input.fill(fillValue);
+                                        return true;
+                                    }
+                                }
+                            }
+                            catch (e) {
+                                // Skip input
+                            }
+                        }
+                    }
+                    catch (e) {
+                        log(`Fill search in frame ${frameIndex} failed (may be cross-origin)`);
+                    }
+                }
+            }
+            catch (frameError) {
+                log(`Frame ${frameIndex} error: ${frameError.message?.substring(0, 50)}`);
+            }
+        }
+        return false;
+    }
+    catch (error) {
+        log(`Frame search failed: ${error.message}`);
+        return false;
+    }
+}
+/**
+ * Wait for dynamically created elements to appear using MutationObserver
+ */
+async function waitForDynamicElement(target, timeout = 5000) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    try {
+        log(`Waiting for dynamic element: ${target} (timeout: ${timeout}ms)`);
+        const found = await state.page.evaluate(({ searchText, waitTime }) => {
+            return new Promise((resolve) => {
+                // First check if element already exists
+                const checkElement = () => {
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        const text = (el.textContent || '').toLowerCase();
+                        const placeholder = el.placeholder?.toLowerCase() || '';
+                        const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+                        const name = el.name?.toLowerCase() || '';
+                        const id = el.id?.toLowerCase() || '';
+                        if (text.includes(searchText.toLowerCase()) ||
+                            placeholder.includes(searchText.toLowerCase()) ||
+                            ariaLabel.includes(searchText.toLowerCase()) ||
+                            name.includes(searchText.toLowerCase()) ||
+                            id.includes(searchText.toLowerCase())) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (checkElement()) {
+                    resolve(true);
+                    return;
+                }
+                // Set up MutationObserver to watch for new elements
+                const observer = new MutationObserver(() => {
+                    if (checkElement()) {
+                        observer.disconnect();
+                        resolve(true);
+                    }
+                });
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    characterData: true
+                });
+                // Timeout after specified time
+                setTimeout(() => {
+                    observer.disconnect();
+                    resolve(false);
+                }, waitTime);
+            });
+        }, { searchText: target, waitTime: timeout });
+        if (found) {
+            log(`Dynamic element found: ${target}`);
+            return true;
+        }
+        else {
+            log(`Dynamic element NOT found after ${timeout}ms: ${target}`);
+            return false;
+        }
+    }
+    catch (error) {
+        log(`Dynamic element wait failed: ${error.message}`);
+        return false;
+    }
+}
+/**
+ * Intelligently retry finding elements across frames and wait for dynamic elements
+ */
+async function advancedElementSearch(target, action, fillValue, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            log(`[Advanced Search Attempt ${attempt}/${maxRetries}] ${target}`);
+            // Step 1: Wait for dynamic element (in case it's being created)
+            const dynamicFound = await waitForDynamicElement(target, 2000);
+            if (dynamicFound) {
+                log(`Element detected as dynamic`);
+                // Try again now that it exists
+                if (action === 'click') {
+                    const clicked = await searchInAllFrames(target, 'click');
+                    if (clicked)
+                        return true;
+                }
+                else {
+                    const filled = await searchInAllFrames(target, 'fill', fillValue);
+                    if (filled)
+                        return true;
+                }
+            }
+            // Step 2: Search across all frames (handles cross-origin and nested)
+            const frameResult = await searchInAllFrames(target, action, fillValue);
+            if (frameResult)
+                return true;
+            // Step 3: If still not found, try old strategies as fallback
+            // (this ensures backward compatibility)
+            if (attempt < maxRetries) {
+                log(`Retrying in ${1000}ms...`);
+                await state.page?.waitForTimeout(1000);
+            }
+        }
+        catch (error) {
+            log(`Advanced search attempt ${attempt} error: ${error.message}`);
+        }
+    }
+    return false;
+}
 async function clickWithRetry(target, maxRetries = 5) {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
+    if (advancedResult) {
+        log(`SUCCESS: Found and clicked via advanced search`);
+        return true;
+    }
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Check if page is still valid before attempting
@@ -489,26 +690,38 @@ async function clickWithRetry(target, maxRetries = 5) {
             catch (e2_5) {
                 log(`Shadow DOM search failed`);
             }
-            // Strategy 3: Search in iframes
+            // Strategy 3: Search in iframes (PRIORITIZED - do this FIRST)
             try {
-                log(`Searching in iframes...`);
+                log(`Searching in iframes for: ${target}...`);
                 const clickedInIframe = await state.page?.evaluate((searchText) => {
                     const iframes = document.querySelectorAll('iframe');
                     for (const iframe of Array.from(iframes)) {
                         try {
                             const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
                             if (iframeDoc) {
-                                const elements = iframeDoc.querySelectorAll('button, a, [role="button"], input[type="button"], div[role="button"]');
-                                for (const el of elements) {
-                                    if (el.textContent?.includes(searchText)) {
-                                        el.click();
-                                        return true;
+                                // Search for ANY element matching the text in iframe
+                                const allElements = iframeDoc.querySelectorAll('*');
+                                for (const el of Array.from(allElements)) {
+                                    const element = el;
+                                    const text = element.textContent || '';
+                                    const isClickable = element.tagName === 'BUTTON' ||
+                                        element.tagName === 'A' ||
+                                        element.getAttribute('role') === 'button' ||
+                                        element.getAttribute('onclick') !== null ||
+                                        element.getAttribute('role') === 'tab';
+                                    if (text.toLowerCase().includes(searchText.toLowerCase()) && isClickable) {
+                                        const rect = element.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            element.click();
+                                            return true;
+                                        }
                                     }
                                 }
                             }
                         }
                         catch (e) {
-                            // Cross-origin - try with Playwright
+                            // Cross-origin iframe
                         }
                     }
                     return false;
@@ -588,6 +801,12 @@ async function clickWithRetry(target, maxRetries = 5) {
     return false;
 }
 async function fillWithRetry(target, value, maxRetries = 5) {
+    // FIRST: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
+    if (advancedResult) {
+        log(`SUCCESS: Found and filled via advanced search`);
+        return true;
+    }
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Check if page is still valid before attempting
@@ -599,7 +818,19 @@ async function fillWithRetry(target, value, maxRetries = 5) {
                     return false;
                 }
             }
-            log(`[Fill Attempt ${attempt}/${maxRetries}] ${target}`);
+            log(`[Fill Attempt ${attempt}/${maxRetries}] Target: ${target}, Value: ${value}`);
+            // Strategy 0: Direct selector fill (if target is a CSS selector)
+            if (target.startsWith('[') || target.startsWith('#') || target.startsWith('.') || target.includes('>')) {
+                try {
+                    log(`Trying direct selector: ${target}`);
+                    await state.page?.fill(target, value, { timeout: 2000 });
+                    log(`Successfully filled via selector`);
+                    return true;
+                }
+                catch (e0) {
+                    log(`Direct selector failed`);
+                }
+            }
             // Strategy 0.5: Find visible input in modals/overlays
             try {
                 log(`Searching for visible input fields in modals...`);
@@ -610,9 +841,14 @@ async function fillWithRetry(target, value, maxRetries = 5) {
                         const style = window.getComputedStyle(el);
                         const placeholder = input.placeholder || '';
                         const label = input.getAttribute('aria-label') || '';
+                        const id = input.id || '';
+                        const name = input.name || '';
                         // Check if visible and matches search text
                         if (style.display !== 'none' && style.visibility !== 'hidden' &&
-                            (placeholder.includes(searchText) || label.includes(searchText))) {
+                            (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
+                                label.toLowerCase().includes(searchText.toLowerCase()) ||
+                                id.toLowerCase().includes(searchText.toLowerCase()) ||
+                                name.toLowerCase().includes(searchText.toLowerCase()))) {
                             const rect = el.getBoundingClientRect();
                             if (rect.width > 0 && rect.height > 0) {
                                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -634,34 +870,109 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             catch (e0) {
                 log(`Modal input search failed`);
             }
-            // Strategy 1: Scroll and direct fill
+            // Strategy 1: Fill in iframes FIRST (most important)
+            try {
+                log(`Searching in iframes to fill...`);
+                const filledInIframe = await state.page?.evaluate(({ searchText, fillValue }) => {
+                    const iframes = document.querySelectorAll('iframe');
+                    for (const iframe of Array.from(iframes)) {
+                        try {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                            if (iframeDoc) {
+                                const inputs = iframeDoc.querySelectorAll('input, textarea');
+                                for (const input of inputs) {
+                                    const placeholder = input.placeholder || '';
+                                    const label = input.getAttribute('aria-label') || '';
+                                    const id = input.id || '';
+                                    const name = input.name || '';
+                                    const value = input.value || '';
+                                    if (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        label.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        id.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        name.toLowerCase().includes(searchText.toLowerCase()) ||
+                                        value.toLowerCase().includes(searchText.toLowerCase())) {
+                                        input.focus();
+                                        input.value = fillValue;
+                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                        catch (e) {
+                            // Cross-origin iframe
+                        }
+                    }
+                    return false;
+                }, { searchText: target, fillValue: value });
+                if (filledInIframe) {
+                    log(`Filled field in iframe`);
+                    await state.page?.waitForTimeout(500);
+                    return true;
+                }
+            }
+            catch (e5) {
+                log(`Iframe fill attempt failed`);
+            }
+            // Strategy 2: Find by text pattern and fill any input
+            try {
+                log(`Searching for any input matching pattern...`);
+                const foundAndFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
+                    // Search for any element containing the text
+                    const allElements = document.querySelectorAll('*');
+                    for (const el of Array.from(allElements)) {
+                        const text = el.textContent || '';
+                        if (text.toLowerCase().includes(searchText.toLowerCase())) {
+                            // Look for nearby input
+                            const inputs = el.querySelectorAll('input, textarea');
+                            if (inputs.length > 0) {
+                                const input = inputs[0];
+                                input.value = fillValue;
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            }
+                            // Check parent for input
+                            let parent = el.parentElement;
+                            for (let i = 0; i < 5; i++) {
+                                if (!parent)
+                                    break;
+                                const parentInputs = parent.querySelectorAll('input, textarea');
+                                if (parentInputs.length > 0) {
+                                    const input = parentInputs[0];
+                                    input.value = fillValue;
+                                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                                parent = parent.parentElement;
+                            }
+                        }
+                    }
+                    return false;
+                }, { searchText: target, fillValue: value });
+                if (foundAndFilled) {
+                    log(`Filled by pattern matching`);
+                    return true;
+                }
+            }
+            catch (e1) {
+                log(`Pattern matching fill failed`);
+            }
+            // Strategy 3: Scroll and direct fill
             try {
                 log(`Scrolling to field...`);
                 await scrollToElement(target);
                 await state.page?.fill(target, value, { timeout: 3000 });
-                log(`Successfully filled`);
+                log(`Successfully filled via scroll`);
                 return true;
             }
-            catch (e1) {
+            catch (e2) {
                 log(`Direct fill failed`);
             }
-            // Strategy 2: Find by label text and scroll
-            try {
-                log(`Finding by label and scrolling...`);
-                const scrollSuccess = await scrollToElementByText(target);
-                if (scrollSuccess) {
-                    const inputSelector = await findInputByLabel(target);
-                    if (inputSelector) {
-                        await state.page?.fill(inputSelector, value, { timeout: 3000 });
-                        log(`Filled by label matching`);
-                        return true;
-                    }
-                }
-            }
-            catch (e2) {
-                log(`Label matching fill failed`);
-            }
-            // Strategy 3: Clear, type with scrolling
+            // Strategy 4: Clear, type with scrolling
             try {
                 log(`Clear and type with scroll...`);
                 await scrollToElement(target);
@@ -675,7 +986,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             catch (e3) {
                 log(`Clear and type failed`);
             }
-            // Strategy 3.5: Shadow DOM fill
+            // Strategy 5: Shadow DOM fill
             try {
                 log(`Searching in Shadow DOM to fill...`);
                 const shadowFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
@@ -685,7 +996,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
                             const placeholder = el.placeholder || '';
                             const ariaLabel = el.getAttribute('aria-label') || '';
                             if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-                                (placeholder.includes(searchText) || ariaLabel.includes(searchText))) {
+                                (placeholder.toLowerCase().includes(searchText.toLowerCase()) || ariaLabel.toLowerCase().includes(searchText.toLowerCase()))) {
                                 const rect = el.getBoundingClientRect();
                                 if (rect.width > 0 && rect.height > 0) {
                                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -713,61 +1024,8 @@ async function fillWithRetry(target, value, maxRetries = 5) {
                     return true;
                 }
             }
-            catch (e3_5) {
-                log(`Shadow DOM fill failed`);
-            }
-            // Strategy 4: JavaScript fill after scrolling
-            try {
-                log(`JavaScript fill with scroll...`);
-                await scrollToElementByText(target);
-                await state.page?.evaluate(([sel, val]) => {
-                    const el = document.querySelector(sel);
-                    if (el) {
-                        el.value = val;
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.dispatchEvent(new Event('change', { bubbles: true }));
-                        el.dispatchEvent(new Event('blur', { bubbles: true }));
-                    }
-                }, [target, value]);
-                log(`Filled using JavaScript`);
-                return true;
-            }
             catch (e4) {
-                log(`JavaScript fill failed`);
-            }
-            // Strategy 5: Fill in iframes
-            try {
-                log(`Searching in iframes to fill...`);
-                const filledInIframe = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    const iframes = document.querySelectorAll('iframe');
-                    for (const iframe of Array.from(iframes)) {
-                        try {
-                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-                            if (iframeDoc) {
-                                const inputs = iframeDoc.querySelectorAll('input');
-                                for (const input of inputs) {
-                                    if (input.placeholder?.includes(searchText) || input.getAttribute('aria-label')?.includes(searchText)) {
-                                        input.value = fillValue;
-                                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        catch (e) {
-                            // Cross-origin
-                        }
-                    }
-                    return false;
-                }, { searchText: target, fillValue: value });
-                if (filledInIframe) {
-                    log(`Filled field in iframe`);
-                    return true;
-                }
-            }
-            catch (e5) {
-                log(`Iframe fill failed`);
+                log(`Shadow DOM fill failed`);
             }
             if (attempt < maxRetries) {
                 log(`Waiting before retry...`);
@@ -781,6 +1039,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             }
         }
     }
+    log(`All fill attempts failed for: ${target}`);
     return false;
 }
 async function getAllPageElements() {
@@ -906,6 +1165,7 @@ async function getAllPageElements() {
                             interactive: isInteractive,
                             label: identifier,
                             priority,
+                            location: 'main',
                             position: {
                                 top: Math.round(rect.top),
                                 left: Math.round(rect.left),
@@ -919,17 +1179,121 @@ async function getAllPageElements() {
                         // Skip elements that can't be accessed
                     }
                 });
+                // NOW SEARCH IN IFRAMES
+                const iframes = document.querySelectorAll('iframe');
+                for (const iframe of Array.from(iframes)) {
+                    try {
+                        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                        if (iframeDoc) {
+                            const iframeElements = iframeDoc.querySelectorAll('*');
+                            iframeElements.forEach((el) => {
+                                try {
+                                    const tagName = el.tagName?.toLowerCase() || '';
+                                    if (['script', 'style', 'meta', 'link', 'noscript', 'head'].includes(tagName)) {
+                                        return;
+                                    }
+                                    const id = el.getAttribute('id') || '';
+                                    const name = el.getAttribute('name') || '';
+                                    const className = el.getAttribute('class') || '';
+                                    const type = el.getAttribute('type') || '';
+                                    const placeholder = el.getAttribute('placeholder') || '';
+                                    const textContent = el.textContent?.trim().substring(0, 150) || '';
+                                    const ariaLabel = el.getAttribute('aria-label') || '';
+                                    const role = el.getAttribute('role') || '';
+                                    const style = window.getComputedStyle(el);
+                                    const isVisible = style.display !== 'none' && style.visibility !== 'hidden';
+                                    let elementType = '';
+                                    let isInteractive = false;
+                                    let priority = 0;
+                                    if (tagName === 'input') {
+                                        elementType = type || 'input';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (tagName === 'button') {
+                                        elementType = 'button';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (tagName === 'a') {
+                                        elementType = 'link';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (tagName === 'textarea') {
+                                        elementType = 'textarea';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (tagName === 'select') {
+                                        elementType = 'select';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (role === 'button') {
+                                        elementType = 'button';
+                                        isInteractive = true;
+                                        priority = 10;
+                                    }
+                                    else if (textContent && textContent.length > 3) {
+                                        elementType = 'text';
+                                        priority = 3;
+                                    }
+                                    else {
+                                        return;
+                                    }
+                                    const uniqueKey = `iframe:${tagName}:${id}:${name}:${textContent.substring(0, 30)}`;
+                                    if (seen.has(uniqueKey))
+                                        return;
+                                    seen.add(uniqueKey);
+                                    const rect = el.getBoundingClientRect();
+                                    const identifier = id || name || ariaLabel || `${elementType}_${elementIndex}`;
+                                    items.push({
+                                        index: elementIndex,
+                                        type: elementType,
+                                        tag: tagName,
+                                        id,
+                                        name,
+                                        class: className,
+                                        placeholder,
+                                        text: textContent,
+                                        ariaLabel,
+                                        role,
+                                        visible: isVisible,
+                                        interactive: isInteractive,
+                                        label: identifier,
+                                        priority,
+                                        location: 'iframe',
+                                        position: {
+                                            top: Math.round(rect.top),
+                                            left: Math.round(rect.left),
+                                            width: Math.round(rect.width),
+                                            height: Math.round(rect.height)
+                                        }
+                                    });
+                                    elementIndex++;
+                                }
+                                catch (e) {
+                                    // Skip
+                                }
+                            });
+                        }
+                    }
+                    catch (e) {
+                        // Cross-origin iframe - skip
+                    }
+                }
             }
             catch (error) {
-                return items; // Return what we have
+                return items;
             }
-            return items.slice(0, 200); // Limit to first 200 elements
+            return items.slice(0, 300); // Increased limit to 300 for more results
         });
         if (!elements || !Array.isArray(elements)) {
             log(`Elements array is invalid, returning empty array`);
             return [];
         }
-        log(`Found ${elements.length} page elements`);
+        log(`Found ${elements.length} page elements (including ${elements.filter((e) => e.location === 'iframe').length} in iframes)`);
         return elements;
     }
     catch (e) {
