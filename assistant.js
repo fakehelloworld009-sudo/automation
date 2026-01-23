@@ -71,13 +71,141 @@ function log(message) {
     console.log(formattedMsg);
     logMessages.push(formattedMsg);
 }
+/**
+ * Inject visual cursor overlay into page for debugging
+ * Shows exactly where the assistant is clicking/filling
+ */
+async function injectVisualCursor(page) {
+    try {
+        await page.evaluate(() => {
+            // Remove if already exists
+            const existing = document.getElementById('assistant-debug-cursor');
+            if (existing)
+                existing.remove();
+            // Create cursor container
+            const cursorContainer = document.createElement('div');
+            cursorContainer.id = 'assistant-debug-cursor';
+            cursorContainer.innerHTML = `
+                <style>
+                    #assistant-debug-cursor {
+                        position: fixed;
+                        pointer-events: none;
+                        z-index: 999999;
+                        font-family: monospace;
+                    }
+                    .cursor-dot {
+                        position: absolute;
+                        width: 20px;
+                        height: 20px;
+                        border: 3px solid #FF0000;
+                        border-radius: 50%;
+                        background: radial-gradient(circle, rgba(255,0,0,0.3) 0%, rgba(255,0,0,0) 70%);
+                        animation: pulse 0.6s infinite;
+                        box-shadow: 0 0 10px #FF0000, inset 0 0 10px rgba(255,0,0,0.5);
+                    }
+                    .cursor-crosshair {
+                        position: absolute;
+                        width: 2px;
+                        height: 30px;
+                        background: #FF0000;
+                        left: 9px;
+                        top: -15px;
+                        animation: blink 0.6s infinite;
+                    }
+                    .cursor-crosshair::before {
+                        content: '';
+                        position: absolute;
+                        width: 30px;
+                        height: 2px;
+                        background: #FF0000;
+                        left: -14px;
+                        top: 14px;
+                    }
+                    .element-info {
+                        position: absolute;
+                        top: 35px;
+                        left: 0;
+                        background: rgba(0, 0, 0, 0.95);
+                        color: #00FF00;
+                        padding: 8px 12px;
+                        border: 2px solid #00FF00;
+                        border-radius: 4px;
+                        font-size: 11px;
+                        max-width: 400px;
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                        box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+                        animation: slideIn 0.3s ease-out;
+                    }
+                    .element-highlight {
+                        position: absolute;
+                        border: 3px solid #00FF00;
+                        background: rgba(0, 255, 0, 0.1);
+                        box-shadow: 0 0 20px rgba(0, 255, 0, 0.6), inset 0 0 10px rgba(0, 255, 0, 0.2);
+                        pointer-events: none;
+                        z-index: 999998;
+                    }
+                    @keyframes pulse {
+                        0%, 100% { transform: scale(1); }
+                        50% { transform: scale(1.3); }
+                    }
+                    @keyframes blink {
+                        0%, 100% { opacity: 1; }
+                        50% { opacity: 0.3; }
+                    }
+                    @keyframes slideIn {
+                        from { opacity: 0; transform: translateY(-10px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                </style>
+                <div class="cursor-dot">
+                    <div class="cursor-crosshair"></div>
+                </div>
+                <div class="element-info"></div>
+            `;
+            document.body.appendChild(cursorContainer);
+            // Store helper function globally
+            window.assistantShowCursor = (x, y, info) => {
+                const cursor = document.getElementById('assistant-debug-cursor');
+                if (cursor) {
+                    cursor.style.left = (x - 10) + 'px';
+                    cursor.style.top = (y - 10) + 'px';
+                    const infoEl = cursor.querySelector('.element-info');
+                    if (infoEl) {
+                        infoEl.textContent = info;
+                    }
+                }
+            };
+            window.assistantHighlightElement = (element, duration = 2000) => {
+                if (!element || !element.getBoundingClientRect)
+                    return;
+                const rect = element.getBoundingClientRect();
+                const highlight = document.createElement('div');
+                highlight.className = 'element-highlight';
+                highlight.style.left = rect.left + 'px';
+                highlight.style.top = rect.top + 'px';
+                highlight.style.width = rect.width + 'px';
+                highlight.style.height = rect.height + 'px';
+                document.body.appendChild(highlight);
+                setTimeout(() => highlight.remove(), duration);
+            };
+        });
+    }
+    catch (e) {
+        // Silently ignore injection errors
+    }
+}
 async function setupPageListeners(page) {
+    // Inject visual cursor on page
+    await injectVisualCursor(page);
     // Listen for popup windows
     page.on('popup', async (popup) => {
         log(`🪟 Popup detected! New window/tab opened`);
         allPages.push(popup);
         // Wait for popup to load
         await popup.waitForLoadState('networkidle').catch(() => { });
+        // Inject visual cursor into popup too
+        await injectVisualCursor(popup).catch(() => { });
         // Keep popup but don't auto-switch (let search find it)
         log(`🪟 Added popup to searchable windows (${allPages.length} windows total)`);
     });
@@ -686,6 +814,7 @@ async function executeClickInFrame(frame, target, framePath) {
                         if (isVisible && isEnabled) {
                             await btn.scrollIntoViewIfNeeded();
                             await btn.click().catch(() => { });
+                            log(`✅ [SUBWINDOW${framePath}] Clicked: "${target}" - Frame Element Found`);
                             return true;
                         }
                     }
@@ -832,7 +961,7 @@ async function executeFillInFrame(frame, target, fillValue, framePath) {
                         await input.dispatchEvent('input');
                         await input.dispatchEvent('change');
                         await input.dispatchEvent('blur');
-                        log(`[FILL] ✓ Pattern 1A: Successfully filled "${title || name || id}" = "${fillValue}"`);
+                        log(`[FILL] ✓ Pattern 1A: Successfully filled "${title || name || id}" = "${fillValue}"${framePath ? ` in ${framePath}` : ''}`);
                         return true;
                     }
                     catch (e) {
@@ -925,7 +1054,7 @@ async function executeFillInFrame(frame, target, fillValue, framePath) {
                         await input.click({ force: true });
                         await input.fill(fillValue, { timeout: 5000 });
                         await input.dispatchEvent('change');
-                        log(`[FILL] ✓ Pattern 3: Filled field at position ${i} = "${fillValue}"`);
+                        log(`[FILL] ✓ Pattern 3: Filled field at position ${i} = "${fillValue}"${framePath ? ` in ${framePath}` : ''}`);
                         return true;
                     }
                     catch (e) { }
@@ -1106,6 +1235,32 @@ async function advancedElementSearch(target, action, fillValue, maxRetries = 3) 
     }
     return false;
 }
+/**
+ * Display visual cursor at element position for debugging
+ */
+async function showVisualCursor(page, element, action, info) {
+    try {
+        await page.evaluate(({ action, info }) => {
+            const el = document.activeElement;
+            if (el && 'getBoundingClientRect' in el) {
+                const rect = el.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                const debugInfo = `🎯 ACTION: ${action}\n📍 Position: (${Math.round(x)}, ${Math.round(y)})\n📝 ${info}`;
+                if (window.assistantShowCursor) {
+                    window.assistantShowCursor(x, y, debugInfo);
+                }
+                if (window.assistantHighlightElement) {
+                    window.assistantHighlightElement(el, 2000);
+                }
+            }
+        }, { action, info });
+        log(`🎯 ${action.toUpperCase()}: ${info}`);
+    }
+    catch (e) {
+        // Silent fail - visual feedback not critical
+    }
+}
 async function clickWithRetry(target, maxRetries = 5) {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
@@ -1158,6 +1313,7 @@ async function clickWithRetry(target, maxRetries = 5) {
                 }, target);
                 if (clicked) {
                     await state.page?.waitForTimeout(800);
+                    await showVisualCursor(state.page, document.activeElement, 'CLICK', `Target: "${target}" - Strategy 0: Modal/Overlay`);
                     return true;
                 }
             }
@@ -1190,6 +1346,7 @@ async function clickWithRetry(target, maxRetries = 5) {
                         log(`Found button by text: ${buttonSelector}`);
                         await state.page?.click(buttonSelector, { timeout: 3000 });
                         log(`Clicked by text matching`);
+                        await showVisualCursor(state.page, document.activeElement, 'CLICK', `Target: "${target}" - Strategy 2: Text Matching`);
                         return true;
                     }
                 }
@@ -1235,6 +1392,7 @@ async function clickWithRetry(target, maxRetries = 5) {
                 if (shadowFound) {
                     log(`Clicked element in shadow DOM`);
                     await state.page?.waitForTimeout(800);
+                    await showVisualCursor(state.page, document.activeElement, 'CLICK', `Target: "${target}" - Strategy 2.5: Shadow DOM`);
                     return true;
                 }
             }
@@ -1280,6 +1438,7 @@ async function clickWithRetry(target, maxRetries = 5) {
                 if (clickedInIframe) {
                     log(`Clicked element in iframe`);
                     await state.page?.waitForTimeout(800);
+                    await showVisualCursor(state.page, document.activeElement, 'CLICK', `Target: "${target}" - Strategy 3: iFrame`);
                     return true;
                 }
             }
@@ -1377,6 +1536,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             if (target.startsWith('[') || target.startsWith('#') || target.startsWith('.') || target.includes('>')) {
                 try {
                     await state.page?.fill(target, value, { timeout: 2000 });
+                    await showVisualCursor(state.page, document.activeElement, 'FILL', `Field: "${target}" = "${value}" - Strategy 0: Direct Selector`);
                     return true;
                 }
                 catch (e0) {
@@ -1417,6 +1577,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
                     return false;
                 }, { searchText: target, value });
                 if (filled) {
+                    await showVisualCursor(state.page, document.activeElement, 'FILL', `Field: "${target}" = "${value}" - Strategy 0.5: Modal/Overlay Input`);
                     return true;
                 }
             }
