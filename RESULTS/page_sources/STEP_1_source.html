@@ -331,7 +331,7 @@
             var objHTTP = createHTTPActiveXObject();
             objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
             objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-            objHTTP.setRequestHeader("X-CSRFTOKEN", 'D7C6161AFF098D415B34B36F09D4654CB89B1946626146858CF66B15247F1311');
+            objHTTP.setRequestHeader("X-CSRFTOKEN", 'AD407912D389064FE3D64FF755E5685ADF75FABD546298D329D88512ED1C1C6F');
             objHTTP.send(strFormData);
             if (objHTTP.status == 200) {
                 var responseXML = objHTTP.responseXML;
@@ -396,7 +396,7 @@
               var objHTTP = createHTTPActiveXObject();
               objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
               objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-              objHTTP.setRequestHeader("X-CSRFTOKEN", 'D7C6161AFF098D415B34B36F09D4654CB89B1946626146858CF66B15247F1311');
+              objHTTP.setRequestHeader("X-CSRFTOKEN", 'AD407912D389064FE3D64FF755E5685ADF75FABD546298D329D88512ED1C1C6F');
               objHTTP.send(strFormData);
               if (objHTTP.status == 200) {
                   var responseXML = objHTTP.responseXML;
@@ -567,7 +567,7 @@ function fnUpdateMfaLog(mfaId) {
     objHTTP.open("POST", "MFALoginValidateServlet?actionType=skipLogin&hdMfaId="+mfaId, true);
     objHTTP.setRequestHeader("Content-Type", "application/xml");
     objHTTP.setRequestHeader("charset", "utf-8");
-    objHTTP.setRequestHeader("X-CSRFTOKEN", 'D7C6161AFF098D415B34B36F09D4654CB89B1946626146858CF66B15247F1311');
+    objHTTP.setRequestHeader("X-CSRFTOKEN", 'AD407912D389064FE3D64FF755E5685ADF75FABD546298D329D88512ED1C1C6F');
     objHTTP.send(null);
     
 }
@@ -657,7 +657,7 @@ function switchTheme(obj, evnt) {
             </div>
             <form class="login" method="POST" action="LoginValidateServlet?msgType=NONWORKFLOW&amp;actionType=login" name="frmLogin" onsubmit="return CheckUser()" autocomplete="off">
 			<label class="LBLinv" for=""></label>
-            <input type="Hidden" name="X-CSRFTOKEN" value="D7C6161AFF098D415B34B36F09D4654CB89B1946626146858CF66B15247F1311" style="">
+            <input type="Hidden" name="X-CSRFTOKEN" value="AD407912D389064FE3D64FF755E5685ADF75FABD546298D329D88512ED1C1C6F" style="">
             <label class="LBLinv" for="hdUserId"></label>
             <input id="hdUserId" type="hidden" name="hdUserId" value="" style="">
             <label class="LBLinv" for="hdPassword"></label>
@@ -683,7 +683,7 @@ function switchTheme(obj, evnt) {
             <label class="LBLinv" for="logintheme"></label><!--HTML5 Changes-->
             <input id="logintheme" type="hidden" name="logintheme" value="L" style=""><!--HTML5 Changes-->
             <div id="username" align="center">
-                <label for="LOGINUSERID" class="overlabel-apply move">User ID</label><!--HTML5 Changes 6/OCT/2016 -->
+                <label for="LOGINUSERID" class="overlabel-apply">User ID</label><!--HTML5 Changes 6/OCT/2016 -->
                 
                     <input id="LOGINUSERID" type="text" name="USERID" title="User ID" tabindex="0" size="15" maxlength="20" value="" style=""><!--HTML5 Changes-->
                 

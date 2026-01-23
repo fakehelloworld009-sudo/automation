@@ -3038,6 +3038,12 @@ async function runAutomation(excelFilePath) {
         const workbook = XLSX.readFile(excelFilePath);
         const sheetName = workbook.SheetNames[0];
         const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        // DEBUG: Show raw data structure
+        log(`\n🔍 DEBUG - Total rows loaded: ${rows.length}`);
+        log(`🔍 DEBUG - First 10 rows raw structure:`);
+        for (let i = 0; i < Math.min(10, rows.length); i++) {
+            log(`\n  Row ${i}: ${JSON.stringify(rows[i]).substring(0, 150)}...`);
+        }
         state.testData = rows;
         state.isStopped = false;
         state.isPaused = false;
@@ -3066,9 +3072,24 @@ async function runAutomation(excelFilePath) {
             const firstRow = rows[0];
             const columns = Object.keys(firstRow);
             log(`\n📊 Excel Columns Found: ${columns.join(' | ')}`);
-            // Check for execution column
+            // Find the actual execution column
+            let executionColumnName = '';
             const executionColumnFound = columns.find(col => col.toUpperCase().includes('EXECUTE') || col.toUpperCase().includes('EXECUTION'));
-            log(`📌 Execution Column: ${executionColumnFound || 'NOT FOUND - using default (YES)'}`);
+            if (executionColumnFound) {
+                executionColumnName = executionColumnFound;
+                log(`📌 Execution Column Found: "${executionColumnName}"`);
+            }
+            else {
+                log(`📌 Execution Column NOT FOUND - will check known variations`);
+            }
+            // Show sample values from first few rows
+            log(`\n📋 Sample Data (First 5 rows):`);
+            for (let j = 0; j < Math.min(5, rows.length); j++) {
+                const execValue = rows[j][executionColumnName] || rows[j]['TO BE EXECUTED'] || 'UNDEFINED';
+                const stepId = rows[j]['STEP'] || rows[j]['STEP ID'] || `Row ${j + 2}`;
+                const action = rows[j]['ACTION'] || 'NO_ACTION';
+                log(`  Row ${j + 2}: ${stepId} | TO_EXECUTE="${execValue}" | ACTION="${action}"`);
+            }
         }
         log(`\n🚀 Starting: ${rows.length} steps\n`);
         for (let i = 0; i < rows.length; i++) {
@@ -3083,21 +3104,40 @@ async function runAutomation(excelFilePath) {
             // Ensure we're on the latest page if new windows opened
             await switchToLatestPage();
             const row = rows[i];
-            // CHECK IF STEP SHOULD BE EXECUTED - Try multiple column name variations
-            const toBeExecutedValue = row['TO BE EXECUTED'] ||
-                row['TO_BE_EXECUTED'] ||
-                row['ToBeExecuted'] ||
-                row['Execution'] ||
-                row['EXECUTION'] ||
-                'YES';
-            const execute = toBeExecutedValue.toString().trim().toUpperCase() === 'YES';
-            // Log the execution decision with details
-            const stepId = row['STEP'] || `STEP_${i + 1}`;
-            log(`\n[${stepId}] TO BE EXECUTED = "${toBeExecutedValue}" → ${execute ? '✅ EXECUTING' : '⏭️ SKIPPING'}`);
-            if (!execute) {
+            // Get step ID first for logging
+            const stepId = row['STEP'] || row['STEP ID'] || row['Step ID'] || `STEP_${i + 1}`;
+            // ===== CRITICAL: CHECK "TO BE EXECUTED" COLUMN =====
+            // Get the exact value from the row
+            let toBeExecutedRaw = row['TO BE EXECUTED'];
+            // If not found, try other column names
+            if (toBeExecutedRaw === undefined || toBeExecutedRaw === null) {
+                toBeExecutedRaw = row['TO_BE_EXECUTED'] ||
+                    row['ToBeExecuted'] ||
+                    row['Execution'] ||
+                    row['EXECUTION'];
+            }
+            // Default to YES only if absolutely nothing found
+            if (toBeExecutedRaw === undefined || toBeExecutedRaw === null) {
+                toBeExecutedRaw = 'YES';
+            }
+            // Clean and normalize the value
+            const toBeExecutedValue = toBeExecutedRaw.toString().trim();
+            const toBeExecutedUpper = toBeExecutedValue.toUpperCase();
+            // ONLY execute if value is exactly "YES" (case-insensitive)
+            const shouldExecute = (toBeExecutedUpper === 'YES');
+            log(`\n[${stepId}] TO BE EXECUTED = "${toBeExecutedValue}" (normalized: "${toBeExecutedUpper}") → ${shouldExecute ? '✅ EXECUTING' : '⏭️ SKIPPING'}`);
+            if (!shouldExecute) {
                 row['Status'] = 'SKIPPED';
-                row['Remarks'] = 'TO BE EXECUTED = NO';
-                log(`[${stepId}] ⏭️ STEP SKIPPED (TO BE EXECUTED is not YES)`);
+                row['Remarks'] = `TO BE EXECUTED = "${toBeExecutedValue}" (not YES)`;
+                log(`[${stepId}] ⏭️ SKIPPED - Only YES is executed\n`);
+                continue;
+            }
+            // Additional check: only execute if ACTION is defined AND not empty
+            const action = (row['ACTION'] || '').toString().trim();
+            if (!action || action === '') {
+                log(`[${stepId}] ⏭️ SKIPPED - No ACTION defined\n`);
+                row['Status'] = 'SKIPPED';
+                row['Remarks'] = 'No ACTION defined';
                 continue;
             }
             const result = await executeStep(row);
