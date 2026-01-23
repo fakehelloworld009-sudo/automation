@@ -51,8 +51,9 @@ let state: AutomationState = {
 
 let logMessages: string[] = [];
 let allPages: Page[] = [];  // Track all open pages/tabs
-let windowHierarchy: Map<Page, { parentPage?: Page; childPages: Page[]; level: number }> = new Map();  // Track nested windows
+let windowHierarchy: Map<Page, { parentPage?: Page; childPages: Page[]; level: number; openedAt: number }> = new Map();  // Track nested windows with timestamp
 let currentSearchContext: { windowPath: string; frameLevel: number; totalFrames: number } | null = null;  // Live search status
+let latestSubwindow: Page | null = null;  // Track the most recently opened subwindow
 
 /* ============== UTILITY FUNCTIONS ============== */
 
@@ -92,31 +93,34 @@ function log(message: string) {
 async function setupPageListeners(page: Page) {
     // Initialize main page in hierarchy
     if (!windowHierarchy.has(page)) {
-        windowHierarchy.set(page, { level: 0, childPages: [] });
+        windowHierarchy.set(page, { level: 0, childPages: [], openedAt: Date.now() });
     }
 
     // Listen for popup windows (nested windows)
     page.on('popup', async (popup: Page) => {
         const parentLevel = windowHierarchy.get(page)?.level || 0;
         const childLevel = parentLevel + 1;
+        const openedAt = Date.now();
         
-        log(`🪟 Popup detected! Nested window (Level ${childLevel}) opened`);
+        log(`🪟 POPUP OPENED! Nested window (Level ${childLevel}) - PRIORITY: SEARCH THIS FIRST`);
         allPages.push(popup);
+        latestSubwindow = popup;  // Track as latest
         
-        // Track window hierarchy
-        windowHierarchy.set(popup, { parentPage: page, level: childLevel, childPages: [] });
+        // Track window hierarchy with timestamp
+        windowHierarchy.set(popup, { parentPage: page, level: childLevel, childPages: [], openedAt });
         if (windowHierarchy.has(page)) {
             windowHierarchy.get(page)!.childPages.push(popup);
         }
         
         // Wait for popup to load
-        await popup.waitForLoadState('networkidle').catch(() => {});
+        await popup.waitForLoadState('domcontentloaded').catch(() => {});
+        await popup.waitForTimeout(500); // Extra wait for UI to render
         
         // Setup nested listeners for this popup (to catch sub-sub-windows)
         await setupPageListeners(popup);
 
-        log(`🪟 Added popup to searchable windows (Level ${childLevel}) - Total: ${allPages.length} windows`);
-        log(`📊 Window Hierarchy: ${buildHierarchyString()}`);
+        log(`🪟 [PRIORITY WINDOW] Popup added to search queue (Level ${childLevel}) - WILL SEARCH THIS FIRST`);
+        log(`🪟 Total windows open: ${allPages.length}`);
     });
 
     // Listen for new pages in context (catch windows opened via window.open() etc)
@@ -124,24 +128,27 @@ async function setupPageListeners(page: Page) {
         if (!allPages.includes(newPage) && !newPage.isClosed()) {
             const parentLevel = windowHierarchy.get(page)?.level || 0;
             const childLevel = parentLevel + 1;
+            const openedAt = Date.now();
             
-            log(`🪟 New context page detected (Level ${childLevel})`);
+            log(`🪟 NEW PAGE OPENED! Context page (Level ${childLevel}) - PRIORITY: SEARCH THIS FIRST`);
             allPages.push(newPage);
+            latestSubwindow = newPage;  // Track as latest
             
-            // Track hierarchy
-            windowHierarchy.set(newPage, { parentPage: page, level: childLevel, childPages: [] });
+            // Track hierarchy with timestamp
+            windowHierarchy.set(newPage, { parentPage: page, level: childLevel, childPages: [], openedAt });
             if (windowHierarchy.has(page)) {
                 windowHierarchy.get(page)!.childPages.push(newPage);
             }
             
             // Wait for page to load
-            await newPage.waitForLoadState('networkidle').catch(() => {});
+            await newPage.waitForLoadState('domcontentloaded').catch(() => {});
+            await newPage.waitForTimeout(500); // Extra wait for UI to render
             
             // Setup listeners recursively for nested popups
             await setupPageListeners(newPage);
             
-            log(`🪟 Added context page to searchable windows (Level ${childLevel}) - Total: ${allPages.length} windows`);
-            log(`📊 Window Hierarchy: ${buildHierarchyString()}`);
+            log(`🪟 [PRIORITY WINDOW] Page added to search queue (Level ${childLevel}) - WILL SEARCH THIS FIRST`);
+            log(`🪟 Total windows open: ${allPages.length}`);
         }
     });
 }
@@ -723,18 +730,49 @@ async function searchInAllSubwindows(target: string, action: 'click' | 'fill', f
     if (allPages.length <= 1) return false; // Only main page open
 
     try {
-        log(`🪟 [NESTED SEARCH START] Searching ${allPages.length} windows for: "${target}"`);
-        log(`📊 ${buildHierarchyString()}`);
+        log(`\n🪟 ========== [SEARCH STRATEGY: PRIORITY WINDOW FIRST] ==========`);
+        log(`🪟 Total windows available: ${allPages.length}`);
         
-        // Recursively search all windows including nested ones
+        // PRIORITY 1: Search latest opened subwindow FIRST if it exists
+        if (latestSubwindow && !latestSubwindow.isClosed() && latestSubwindow !== state.page) {
+            log(`\n🎯 [PRIORITY 1] Searching LATEST OPENED SUBWINDOW FIRST (e.g., Customer Maintenance)`);
+            const result = await searchWindowsRecursively(latestSubwindow, target, action, fillValue, windowHierarchy.get(latestSubwindow)?.level || 1, allPages.length);
+            if (result) {
+                state.page = latestSubwindow;
+                log(`✅ [PRIORITY 1] Found element in latest subwindow!`);
+                return true;
+            }
+        }
+        
+        // PRIORITY 2: Search other subwindows by recency (newest first)
+        log(`\n🎯 [PRIORITY 2] Searching OTHER SUBWINDOWS by recency (newest first)`);
+        const subwindowsSorted = allPages
+            .filter(p => p !== state.page && !p.isClosed())
+            .sort((a, b) => {
+                const aTime = windowHierarchy.get(a)?.openedAt || 0;
+                const bTime = windowHierarchy.get(b)?.openedAt || 0;
+                return bTime - aTime; // Newest first
+            });
+        
+        for (const subwindow of subwindowsSorted) {
+            log(`\n   → Checking subwindow (opened at ${new Date(windowHierarchy.get(subwindow)?.openedAt || 0).toLocaleTimeString()})`);
+            const result = await searchWindowsRecursively(subwindow, target, action, fillValue, windowHierarchy.get(subwindow)?.level || 1, allPages.length);
+            if (result) {
+                state.page = subwindow;
+                log(`✅ [PRIORITY 2] Found element in subwindow!`);
+                return true;
+            }
+        }
+        
+        // PRIORITY 3: Only then search main window
+        log(`\n🎯 [PRIORITY 3] Searching MAIN WINDOW (if not found in subwindows)`);
         const result = await searchWindowsRecursively(state.page!, target, action, fillValue, 0, allPages.length);
-        
         if (result) {
-            log(`✅ [NESTED SEARCH] Element found and accessed!`);
+            log(`✅ [PRIORITY 3] Found element in main window!`);
             return true;
         }
         
-        log(`🪟 [NESTED SEARCH] Element not found in any window hierarchy`);
+        log(`\n❌ Element not found in ANY window (checked ${allPages.length} windows)`);
         return false;
     } catch (error: any) {
         log(`🪟 [NESTED SEARCH ERROR] ${error.message}`);
@@ -743,7 +781,7 @@ async function searchInAllSubwindows(target: string, action: 'click' | 'fill', f
 }
 
 /**
- * Recursive helper to search windows at all nesting levels
+ * Recursive helper to search windows at all nesting levels - ALL FRAMES THOROUGHLY
  */
 async function searchWindowsRecursively(
     currentPage: Page,
@@ -759,59 +797,81 @@ async function searchWindowsRecursively(
         const pageInfo = windowHierarchy.get(currentPage);
         const windowLabel = depth === 0 ? '🏠 MAIN WINDOW' : `📍 SUBWINDOW (Level ${depth})`;
         
+        // Extended wait for subwindows to fully load
         await currentPage.waitForLoadState('domcontentloaded').catch(() => {});
+        if (depth > 0) {
+            await currentPage.waitForTimeout(800); // Extra wait for overlay/popup render
+        }
         
-        // Get frames in current window
+        // Get frames in current window - ENSURE WE GET ALL
         const frames = currentPage.frames();
         
-        log(`\n🔍 [WINDOW SEARCH] ${windowLabel}`);
-        log(`   ├─ Frames to search: ${frames.length}`);
-        log(`   ├─ Target: "${target}"`);
-        log(`   └─ Depth level: ${depth}`);
+        log(`\n🔍 [${'═'.repeat(50)}]`);
+        log(`🔍 [WINDOW SEARCH] ${windowLabel}`);
+        log(`🔍 ├─ TOTAL FRAMES TO SEARCH: ${frames.length}`);
+        log(`🔍 ├─ TARGET: "${target}"`);
+        log(`🔍 ├─ WINDOW DEPTH: ${depth}/${totalWindows - 1}`);
+        log(`🔍 └─ STATUS: Searching ALL frames thoroughly...\n`);
         
-        // Search frames in this window
+        // Search ALL frames in this window
         for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
             const frame = frames[frameIdx];
             
             try {
                 await frame.waitForLoadState('domcontentloaded').catch(() => {});
-                await frame.waitForTimeout(100);
+                await frame.waitForTimeout(150);
                 
                 const frameLabel = frameIdx === 0 ? 'Main Frame' : `iFrame ${frameIdx}`;
                 updateSearchContext(`${windowLabel} > ${frameLabel}`, frameIdx + 1, frames.length);
                 
-                log(`   🔎 Searching Frame ${frameIdx + 1}/${frames.length}: ${frameLabel}`);
+                log(`   📍 [Frame ${frameIdx + 1}/${frames.length}] ${frameLabel}`);
                 
                 if (action === 'click') {
                     const result = await executeClickInFrame(frame, target, `${windowLabel}:${frameLabel}`);
                     if (result) {
                         state.page = currentPage;
-                        log(`   ✅ FOUND in ${frameLabel}!`);
+                        log(`   ✅ SUCCESS! Target "${target}" found and clicked in ${frameLabel}`);
                         return true;
+                    } else {
+                        log(`   ⚠️  Target not found in this frame, continuing...`);
                     }
                 } else if (action === 'fill' && fillValue) {
                     const result = await executeFillInFrame(frame, target, fillValue, `${windowLabel}:${frameLabel}`);
                     if (result) {
                         state.page = currentPage;
-                        log(`   ✅ FOUND in ${frameLabel}!`);
+                        log(`   ✅ SUCCESS! Field "${target}" found and filled with "${fillValue}" in ${frameLabel}`);
                         return true;
+                    } else {
+                        log(`   ⚠️  Field not found in this frame, continuing...`);
                     }
                 }
             } catch (frameError: any) {
-                log(`   ⚠️  Frame ${frameIdx} search failed: ${frameError.message}`);
+                log(`   ❌ Frame ${frameIdx} error: ${frameError.message}`);
                 continue;
             }
         }
         
+        // Log completion of this window's frames
+        log(`\n   📝 Completed ALL ${frames.length} frames in ${windowLabel}`);
+        
         // Now recursively search child windows (sub-sub-windows)
         const childPages = pageInfo?.childPages || [];
         if (childPages.length > 0) {
-            log(`\n   🪟 Found ${childPages.length} nested subwindow(s), searching recursively...`);
+            log(`\n   🪟 ⬇️  Found ${childPages.length} nested subwindow(s) inside ${windowLabel}`);
+            log(`   🪟 Now searching these nested subwindows recursively...\n`);
             
-            for (let childIdx = 0; childIdx < childPages.length; childIdx++) {
-                const childPage = childPages[childIdx];
+            // Sort child pages by recency
+            const childPagesSorted = childPages.sort((a, b) => {
+                const aTime = windowHierarchy.get(a)?.openedAt || 0;
+                const bTime = windowHierarchy.get(b)?.openedAt || 0;
+                return bTime - aTime; // Newest first
+            });
+            
+            for (let childIdx = 0; childIdx < childPagesSorted.length; childIdx++) {
+                const childPage = childPagesSorted[childIdx];
+                const childOpenTime = windowHierarchy.get(childPage)?.openedAt || Date.now();
                 
-                log(`\n   → Entering nested level ${depth + 1}...\n`);
+                log(`\n   ⬇️  [Nested ${childIdx + 1}/${childPagesSorted.length}] Entering nested level ${depth + 1} (opened: ${new Date(childOpenTime).toLocaleTimeString()})...\n`);
                 
                 const result = await searchWindowsRecursively(
                     childPage,
@@ -823,12 +883,15 @@ async function searchWindowsRecursively(
                 );
                 
                 if (result) return true;
+                
+                log(`\n   ⬆️  Returned from nested level ${depth + 1}, continuing...\n`);
             }
         }
         
+        log(`\n🔍 [${'═'.repeat(50)}] ✓ Completed search for ${windowLabel}\n`);
         return false;
     } catch (error: any) {
-        log(`⚠️  Error searching window at depth ${depth}: ${error.message}`);
+        log(`❌ Error searching window at depth ${depth}: ${error.message}`);
         return false;
     }
 }
@@ -838,18 +901,20 @@ async function searchWindowsRecursively(
  */
 async function detectNewNestedWindows(parentPage: Page): Promise<void> {
     try {
-        await parentPage.waitForTimeout(500); // Brief delay for windows to open
+        await parentPage.waitForTimeout(800); // Increased wait for windows to fully open
         
         const newPages = state.context?.pages().filter(p => !allPages.includes(p)) || [];
         
         for (const newPage of newPages) {
-            if (!allPages.includes(newPage)) {
+            if (!allPages.includes(newPage) && !newPage.isClosed()) {
                 const parentLevel = windowHierarchy.get(parentPage)?.level || 0;
                 const level = parentLevel + 1;
+                const openedAt = Date.now();
                 
-                log(`🆕 New nested window detected (Level ${level})`);
+                log(`🆕 [DETECTED] New window opened (Level ${level}) - WILL BE PRIORITY FOR NEXT SEARCH`);
                 allPages.push(newPage);
-                windowHierarchy.set(newPage, { parentPage, level, childPages: [] });
+                latestSubwindow = newPage; // Update latest subwindow
+                windowHierarchy.set(newPage, { parentPage, level, childPages: [], openedAt });
                 
                 if (windowHierarchy.has(parentPage)) {
                     windowHierarchy.get(parentPage)!.childPages.push(newPage);
@@ -857,7 +922,7 @@ async function detectNewNestedWindows(parentPage: Page): Promise<void> {
                 
                 await setupPageListeners(newPage);
                 
-                log(`📊 Updated Window Hierarchy: ${buildHierarchyString()}`);
+                log(`🆕 Window added to priority queue (will search this next)`);
             }
         }
     } catch (e) {
