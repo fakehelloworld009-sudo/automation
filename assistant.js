@@ -2896,6 +2896,13 @@ const htmlUI = `
     <script>
         let selectedFile = null;
 
+        // Initialize auto-scroll behavior when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupLogAutoScroll);
+        } else {
+            setupLogAutoScroll();
+        }
+
         document.getElementById('excelFile').addEventListener('change', (e) => {
             selectedFile = e.target.files[0];
             document.getElementById('fileName').textContent = selectedFile ? 'Selected: ' + selectedFile.name : '';
@@ -3079,10 +3086,49 @@ const htmlUI = `
             }
         }
 
+        // Track if user is manually scrolling
+        let isUserScrolling = false;
+        let scrollTimeout;
+
+        function setupLogAutoScroll() {
+            const logsDiv = document.getElementById('logs');
+            
+            // Detect when user starts scrolling
+            logsDiv.addEventListener('scroll', () => {
+                isUserScrolling = true;
+                clearTimeout(scrollTimeout);
+                
+                // Check if user scrolled to bottom
+                const isAtBottom = logsDiv.scrollHeight - logsDiv.clientHeight <= logsDiv.scrollTop + 5;
+                
+                // If they're at bottom or within 5px, resume auto-scroll
+                if (isAtBottom) {
+                    isUserScrolling = false;
+                } else {
+                    // Stop auto-scroll for 3 seconds after user stops scrolling
+                    scrollTimeout = setTimeout(() => {
+                        // Only resume if we're not actively running
+                        if (document.getElementById('statusValue').textContent !== 'Running') {
+                            isUserScrolling = false;
+                        }
+                    }, 3000);
+                }
+            }, { passive: true });
+        }
+
         function updateLogs(logs) {
             const logsDiv = document.getElementById('logs');
             logsDiv.innerHTML = logs.map(log => '<div class="log-entry">' + log + '</div>').join('');
-            // NOTE: Auto-scroll removed to allow user to scroll up and read history without being forced back down
+            
+            // Auto-scroll to bottom only if:
+            // 1. User isn't manually scrolling
+            // 2. OR User scrolled to bottom and left the area
+            if (!isUserScrolling) {
+                // Small delay to ensure DOM is updated
+                setTimeout(() => {
+                    logsDiv.scrollTop = logsDiv.scrollHeight;
+                }, 0);
+            }
         }
 
         function resetUI() {

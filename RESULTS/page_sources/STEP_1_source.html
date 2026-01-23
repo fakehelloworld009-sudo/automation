@@ -331,7 +331,7 @@
             var objHTTP = createHTTPActiveXObject();
             objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
             objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-            objHTTP.setRequestHeader("X-CSRFTOKEN", 'AAC435945C33DF6CFC715CAB22E191FAA4931CF3FA405D2EED7833E2EE7384D0');
+            objHTTP.setRequestHeader("X-CSRFTOKEN", '58D4A7F9A4D39E5EEC0ADAA30020FFBE4B6927E0E7F7930C53E4C0AB49B43A99');
             objHTTP.send(strFormData);
             if (objHTTP.status == 200) {
                 var responseXML = objHTTP.responseXML;
@@ -396,7 +396,7 @@
               var objHTTP = createHTTPActiveXObject();
               objHTTP.open("POST", "SMSSignOffServlet?actionType=signOff", false);
               objHTTP.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-              objHTTP.setRequestHeader("X-CSRFTOKEN", 'AAC435945C33DF6CFC715CAB22E191FAA4931CF3FA405D2EED7833E2EE7384D0');
+              objHTTP.setRequestHeader("X-CSRFTOKEN", '58D4A7F9A4D39E5EEC0ADAA30020FFBE4B6927E0E7F7930C53E4C0AB49B43A99');
               objHTTP.send(strFormData);
               if (objHTTP.status == 200) {
                   var responseXML = objHTTP.responseXML;
@@ -567,7 +567,7 @@ function fnUpdateMfaLog(mfaId) {
     objHTTP.open("POST", "MFALoginValidateServlet?actionType=skipLogin&hdMfaId="+mfaId, true);
     objHTTP.setRequestHeader("Content-Type", "application/xml");
     objHTTP.setRequestHeader("charset", "utf-8");
-    objHTTP.setRequestHeader("X-CSRFTOKEN", 'AAC435945C33DF6CFC715CAB22E191FAA4931CF3FA405D2EED7833E2EE7384D0');
+    objHTTP.setRequestHeader("X-CSRFTOKEN", '58D4A7F9A4D39E5EEC0ADAA30020FFBE4B6927E0E7F7930C53E4C0AB49B43A99');
     objHTTP.send(null);
     
 }
@@ -657,7 +657,7 @@ function switchTheme(obj, evnt) {
             </div>
             <form class="login" method="POST" action="LoginValidateServlet?msgType=NONWORKFLOW&amp;actionType=login" name="frmLogin" onsubmit="return CheckUser()" autocomplete="off">
 			<label class="LBLinv" for=""></label>
-            <input type="Hidden" name="X-CSRFTOKEN" value="AAC435945C33DF6CFC715CAB22E191FAA4931CF3FA405D2EED7833E2EE7384D0" style="">
+            <input type="Hidden" name="X-CSRFTOKEN" value="58D4A7F9A4D39E5EEC0ADAA30020FFBE4B6927E0E7F7930C53E4C0AB49B43A99" style="">
             <label class="LBLinv" for="hdUserId"></label>
             <input id="hdUserId" type="hidden" name="hdUserId" value="" style="">
             <label class="LBLinv" for="hdPassword"></label>
