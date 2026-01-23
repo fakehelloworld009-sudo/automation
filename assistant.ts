@@ -1321,69 +1321,115 @@ async function executeFillInFrame(frame: any, target: string, fillValue: string,
 async function waitForDynamicElement(target: string, timeout: number = 5000): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
 
-    try {
-        log(`Waiting for dynamic element: ${target} (timeout: ${timeout}ms)`);
-        
-        const found = await state.page.evaluate(({ searchText, waitTime }) => {
-            return new Promise<boolean>((resolve) => {
-                // First check if element already exists
-                const checkElement = () => {
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of Array.from(allElements)) {
-                        const text = (el.textContent || '').toLowerCase();
-                        const placeholder = (el as any).placeholder?.toLowerCase() || '';
-                        const ariaLabel = (el as any).getAttribute('aria-label')?.toLowerCase() || '';
-                        const name = (el as any).name?.toLowerCase() || '';
-                        const id = (el as any).id?.toLowerCase() || '';
+    const startTime = Date.now();
+    const checkAllWindows = async (): Promise<boolean> => {
+        // Check priority window first
+        if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
+            const found = await latestSubwindow.evaluate(({ searchText }) => {
+                const allElements = document.querySelectorAll('*');
+                for (const el of Array.from(allElements)) {
+                    const text = (el.textContent || '').toLowerCase();
+                    const placeholder = (el as any).placeholder?.toLowerCase() || '';
+                    const ariaLabel = (el as any).getAttribute('aria-label')?.toLowerCase() || '';
+                    const name = (el as any).name?.toLowerCase() || '';
+                    const id = (el as any).id?.toLowerCase() || '';
 
-                        if (text.includes(searchText.toLowerCase()) ||
-                            placeholder.includes(searchText.toLowerCase()) ||
-                            ariaLabel.includes(searchText.toLowerCase()) ||
-                            name.includes(searchText.toLowerCase()) ||
-                            id.includes(searchText.toLowerCase())) {
-                            return true;
-                        }
+                    if (text.includes(searchText.toLowerCase()) ||
+                        placeholder.includes(searchText.toLowerCase()) ||
+                        ariaLabel.includes(searchText.toLowerCase()) ||
+                        name.includes(searchText.toLowerCase()) ||
+                        id.includes(searchText.toLowerCase())) {
+                        return true;
                     }
-                    return false;
-                };
-
-                if (checkElement()) {
-                    resolve(true);
-                    return;
                 }
-
-                // Set up MutationObserver to watch for new elements
-                const observer = new MutationObserver(() => {
-                    if (checkElement()) {
-                        observer.disconnect();
-                        resolve(true);
-                    }
-                });
-
-                observer.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    characterData: true
-                });
-
-                // Timeout after specified time
-                setTimeout(() => {
-                    observer.disconnect();
-                    resolve(false);
-                }, waitTime);
-            });
-        }, { searchText: target, waitTime: timeout });
-
-        if (found) {
-            log(`Dynamic element found: ${target}`);
-            return true;
-        } else {
-            log(`Dynamic element NOT found after ${timeout}ms: ${target}`);
-            return false;
+                return false;
+            }, { searchText: target }).catch(() => false);
+            
+            if (found) {
+                log(`✅ Dynamic element found in PRIORITY SUBWINDOW: ${target}`);
+                state.page = latestSubwindow; // Switch to this window
+                return true;
+            }
         }
+
+        // Then check main window and other subwindows
+        try {
+            const found = await state.page.evaluate(({ searchText }) => {
+                return new Promise<boolean>((resolve) => {
+                    const checkElement = () => {
+                        const allElements = document.querySelectorAll('*');
+                        for (const el of Array.from(allElements)) {
+                            const text = (el.textContent || '').toLowerCase();
+                            const placeholder = (el as any).placeholder?.toLowerCase() || '';
+                            const ariaLabel = (el as any).getAttribute('aria-label')?.toLowerCase() || '';
+                            const name = (el as any).name?.toLowerCase() || '';
+                            const id = (el as any).id?.toLowerCase() || '';
+
+                            if (text.includes(searchText.toLowerCase()) ||
+                                placeholder.includes(searchText.toLowerCase()) ||
+                                ariaLabel.includes(searchText.toLowerCase()) ||
+                                name.includes(searchText.toLowerCase()) ||
+                                id.includes(searchText.toLowerCase())) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    };
+
+                    if (checkElement()) {
+                        resolve(true);
+                        return;
+                    }
+
+                    // Set up MutationObserver to watch for new elements
+                    const observer = new MutationObserver(() => {
+                        if (checkElement()) {
+                            observer.disconnect();
+                            resolve(true);
+                        }
+                    });
+
+                    observer.observe(document.body, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        characterData: true
+                    });
+
+                    // Quick timeout - we'll loop again
+                    setTimeout(() => {
+                        observer.disconnect();
+                        resolve(false);
+                    }, 500);
+                });
+            }, { searchText: target }).catch(() => false);
+
+            if (found) {
+                log(`Dynamic element found: ${target}`);
+                return true;
+            }
+        } catch (e) {
+            // Continue
+        }
+
+        return false;
+    };
+
+    try {
+        log(`🔍 Waiting for dynamic element: "${target}" (checking all windows, timeout: ${timeout}ms)`);
+        
+        // Poll all windows until element found or timeout
+        while (Date.now() - startTime < timeout) {
+            if (await checkAllWindows()) {
+                return true;
+            }
+            await new Promise(r => setTimeout(r, 200)); // Check every 200ms
+        }
+
+        log(`Dynamic element NOT found after ${timeout}ms: ${target}`);
+        return false;
     } catch (error: any) {
-        log(`Dynamic element wait failed: ${error.message}`);
+        log(`Error waiting for dynamic element: ${error.message}`);
         return false;
     }
 }
@@ -1429,6 +1475,20 @@ async function advancedElementSearch(target: string, action: 'click' | 'fill', f
 async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+
+    // PRIORITY 1: If there's a priority subwindow open, search it FIRST before main window
+    if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
+        log(`\n🎯 [PRIORITY SEARCH] Latest subwindow is open - searching it FIRST for target: "${target}"`);
+        try {
+            const foundInPriorityWindow = await searchInAllSubwindows(target, 'click');
+            if (foundInPriorityWindow) {
+                log(`✅ [PRIORITY SEARCH] Successfully clicked in priority subwindow!`);
+                return true;
+            }
+        } catch (e) {
+            log(`Priority subwindow search failed, continuing...`);
+        }
+    }
 
     // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
     const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
@@ -1697,6 +1757,20 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
 async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+
+    // PRIORITY 1: If there's a priority subwindow open, search it FIRST before main window
+    if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
+        log(`\n🎯 [PRIORITY SEARCH] Latest subwindow is open - searching it FIRST for field: "${target}"`);
+        try {
+            const foundInPriorityWindow = await searchInAllSubwindows(target, 'fill', value);
+            if (foundInPriorityWindow) {
+                log(`✅ [PRIORITY SEARCH] Successfully filled in priority subwindow!`);
+                return true;
+            }
+        } catch (e) {
+            log(`Priority subwindow search failed, continuing...`);
+        }
+    }
 
     // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
     const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
