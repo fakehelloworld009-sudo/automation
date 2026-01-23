@@ -1685,11 +1685,11 @@ async function getAllPageElements() {
                         const role = el.getAttribute('role') || '';
                         // Get element visibility
                         const style = window.getComputedStyle(el);
+                        // For overlay elements, be more lenient - check if element is actually in viewport or has dimensions
                         const isVisible = style.display !== 'none' &&
-                            style.visibility !== 'hidden' &&
-                            style.opacity !== '0' &&
-                            el.offsetWidth > 0 &&
-                            el.offsetHeight > 0;
+                            (style.visibility !== 'hidden' || style.opacity !== '0') &&
+                            (el.offsetWidth > 0 || el.clientWidth > 0) &&
+                            (el.offsetHeight > 0 || el.clientHeight > 0);
                         // Determine element type
                         let elementType = '';
                         let isInteractive = false;
@@ -1857,11 +1857,12 @@ async function getAllPageElements() {
                                 const role = el.getAttribute('role') || '';
                                 // Get element visibility
                                 const style = window.getComputedStyle(el);
-                                const isVisible = style.display !== 'none' &&
-                                    style.visibility !== 'hidden' &&
-                                    style.opacity !== '0' &&
-                                    el.offsetWidth > 0 &&
-                                    el.offsetHeight > 0;
+                                // For overlay elements, accept elements that are either:
+                                // 1. Normally visible (display != none)
+                                // 2. Have any width/height (offsetWidth, clientWidth, etc)
+                                // 3. Are interactive (clickable, forms, etc)
+                                const isVisible = (style.display !== 'none' || el.offsetWidth > 0 || el.clientWidth > 0) &&
+                                    (el.offsetHeight > 0 || el.clientHeight > 0 || el.offsetParent !== null);
                                 // Skip hidden or very small elements
                                 if (!isVisible)
                                     continue;
@@ -2111,8 +2112,10 @@ async function getAllPageElements() {
                                             const title = shadowEl.getAttribute('title') || '';
                                             const role = shadowEl.getAttribute('role') || '';
                                             const style = window.getComputedStyle(shadowEl);
-                                            const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' &&
-                                                shadowEl.offsetWidth > 0 && shadowEl.offsetHeight > 0;
+                                            // More lenient visibility check for shadow DOM elements
+                                            const isVisible = style.display !== 'none' &&
+                                                (shadowEl.offsetWidth > 0 || shadowEl.clientWidth > 0) &&
+                                                (shadowEl.offsetHeight > 0 || shadowEl.clientHeight > 0);
                                             if (!isVisible)
                                                 continue;
                                             let elementType = '';
