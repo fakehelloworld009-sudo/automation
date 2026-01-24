@@ -2014,64 +2014,34 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
 
-    // CHECK: Is there an overlay/modal visible on the page?
-    // If yes, search the overlay FIRST before main page (overlay takes precedence)
-    const hasVisibleOverlay = await state.page?.evaluate(() => {
-        const overlayIndicators = document.querySelectorAll(
-            '[role="dialog"], [role="alertdialog"], .modal, .overlay, .dialog, .popup, ' +
-            '[class*="modal"], [class*="overlay"], [class*="dialog"], [class*="popup"]'
-        );
-        
-        for (const el of Array.from(overlayIndicators)) {
-            const style = window.getComputedStyle(el);
-            const rect = (el as HTMLElement).getBoundingClientRect();
-            // Check if overlay is actually visible and has size
-            if (style.display !== 'none' && style.visibility !== 'hidden' && 
-                rect.width > 0 && rect.height > 0) {
-                return true;
-            }
-        }
-        return false;
-    }).catch(() => false);
-
-    // If overlay is visible, search it FIRST
-    if (hasVisibleOverlay) {
-        log(`\n🎨 [OVERLAY DETECTED - PRIORITY 1] An overlay/modal is visible - searching it FIRST...`);
-        const overlayResult = await searchInPageOverlays(target, 'click');
-        if (overlayResult) {
-            log(`✅ [OVERLAY CLICK SUCCESS] Clicked element in overlay: "${target}"`);
-            return true;
-        }
+    // **CHANGED PRIORITY ORDER**
+    // Search OVERLAYS FIRST - if an overlay is visible, elements inside it take priority
+    // This prevents clicking main page elements when an overlay form is open
+    log(`\n🎨 [PRIORITY 1 - OVERLAY SEARCH] Checking for overlays/modals FIRST...`);
+    const overlayResult = await searchInPageOverlays(target, 'click');
+    if (overlayResult) {
+        log(`✅ [OVERLAY CLICK SUCCESS] Clicked element in overlay: "${target}"`);
+        return true;
     }
 
-    // PRIORITY 1/2: Search MAIN PAGE & FRAMES
-    // This handles normal elements on main page (only if no overlay or overlay search failed)
-    log(`\n🔍 [MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
+    // PRIORITY 2: Search MAIN PAGE & FRAMES if overlay search failed
+    // This handles normal elements like "Go", "New" button on main page
+    log(`\n🔍 [PRIORITY 2 - MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
     const mainPageResult = await searchInAllFrames(target, 'click');
     if (mainPageResult) {
         return true;
     }
 
-    // PRIORITY 3: If no overlay was found initially, search overlays now
-    if (!hasVisibleOverlay) {
-        log(`\n🎨 [OVERLAY SEARCH] No overlay detected initially, but trying fallback overlay search...`);
-        const overlayResult = await searchInPageOverlays(target, 'click');
-        if (overlayResult) {
-            log(`✅ [OVERLAY CLICK SUCCESS] Clicked element in overlay: "${target}"`);
-            return true;
-        }
-    }
-
-    // PRIORITY 4: Try advanced fallback search
-    log(`\n🔍 [ADVANCED SEARCH] Searching using fallback methods...`);
+    // PRIORITY 3: Try advanced fallback search
+    log(`\n🔍 [PRIORITY 3 - ADVANCED SEARCH] Searching using fallback methods...`);
     const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
     if (advancedResult) {
         return true;
     }
 
-    // PRIORITY 5: If there's a priority subwindow open, search it
+    // PRIORITY 4: If there's a priority subwindow open, search it
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
-        log(`\n🎯 [SUBWINDOW SEARCH] Latest subwindow is open - searching for target: "${target}"`);
+        log(`\n🎯 [PRIORITY 4 - SUBWINDOW SEARCH] Latest subwindow is open - searching for target: "${target}"`);
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'click');
             if (foundInPriorityWindow) {
@@ -2353,62 +2323,32 @@ async function fillWithRetry(target: string, value: string, maxRetries: number =
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
 
-    // CHECK: Is there an overlay/modal visible on the page?
-    // If yes, search the overlay FIRST before main page (overlay takes precedence)
-    const hasVisibleOverlay = await state.page?.evaluate(() => {
-        const overlayIndicators = document.querySelectorAll(
-            '[role="dialog"], [role="alertdialog"], .modal, .overlay, .dialog, .popup, ' +
-            '[class*="modal"], [class*="overlay"], [class*="dialog"], [class*="popup"]'
-        );
-        
-        for (const el of Array.from(overlayIndicators)) {
-            const style = window.getComputedStyle(el);
-            const rect = (el as HTMLElement).getBoundingClientRect();
-            // Check if overlay is actually visible and has size
-            if (style.display !== 'none' && style.visibility !== 'hidden' && 
-                rect.width > 0 && rect.height > 0) {
-                return true;
-            }
-        }
-        return false;
-    }).catch(() => false);
-
-    // If overlay is visible, search it FIRST
-    if (hasVisibleOverlay) {
-        log(`\n🎨 [OVERLAY DETECTED - PRIORITY 1] An overlay/modal is visible - searching it FIRST...`);
-        const overlayResult = await searchInPageOverlays(target, 'fill', value);
-        if (overlayResult) {
-            log(`✅ [OVERLAY FILL SUCCESS] Filled field in overlay: "${target}" = "${value}"`);
-            return true;
-        }
+    // **CHANGED PRIORITY ORDER**
+    // Search OVERLAYS FIRST - if an overlay form is visible, search it first
+    // This prevents filling wrong fields on main page when overlay is open
+    log(`\n🎨 [PRIORITY 1 - OVERLAY SEARCH] Checking for overlays/modals FIRST...`);
+    const overlayResult = await searchInPageOverlays(target, 'fill', value);
+    if (overlayResult) {
+        log(`✅ [OVERLAY FILL SUCCESS] Filled field in overlay: "${target}" = "${value}"`);
+        return true;
     }
 
-    // PRIORITY 1/2: Search MAIN PAGE & FRAMES
-    // This handles normal form fields (only if no overlay or overlay search failed)
-    log(`\n🔍 [MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
+    // PRIORITY 2: Search MAIN PAGE & FRAMES if overlay search failed
+    // This handles normal form fields on the main page
+    log(`\n🔍 [PRIORITY 2 - MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
     const mainPageResult = await searchInAllFrames(target, 'fill', value);
     if (mainPageResult) {
         return true;
     }
 
-    // PRIORITY 3: If no overlay was found initially, search overlays now
-    if (!hasVisibleOverlay) {
-        log(`\n🎨 [OVERLAY SEARCH] No overlay detected initially, but trying fallback overlay search...`);
-        const overlayResult = await searchInPageOverlays(target, 'fill', value);
-        if (overlayResult) {
-            log(`✅ [OVERLAY FILL SUCCESS] Filled field in overlay: "${target}" = "${value}"`);
-            return true;
-        }
-    }
-
-    // PRIORITY 4: Try advanced fallback search
-    log(`\n🔍 [ADVANCED SEARCH] Searching using fallback methods...`);
+    // PRIORITY 3: Try advanced fallback search
+    log(`\n🔍 [PRIORITY 3 - ADVANCED SEARCH] Searching using fallback methods...`);
     const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
     if (advancedResult) {
         return true;
     }
 
-    // PRIORITY 5: If there's a priority subwindow open, search it
+    // PRIORITY 4: If there's a priority subwindow open, search it
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
         log(`\n🎯 [PRIORITY 4 - SUBWINDOW SEARCH] Latest subwindow is open - searching for field: "${target}"`);
         try {
