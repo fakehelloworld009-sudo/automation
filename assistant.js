@@ -1493,11 +1493,194 @@ async function waitForDynamicElement(target, timeout = 2000) {
     }
 }
 /**
+ * Search for overlays/modals/dialogs within the main page
+ * These are child elements rendered on top of main content, not separate windows
+ * Examples: Customer Maintenance popup, dialogs, modals rendered in overlay containers
+ * PRIORITY: Search these FIRST before searching main page elements
+ */
+async function searchInPageOverlays(target, action, fillValue) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    try {
+        log(`\n🎨 [OVERLAY PRIORITY] Searching for overlays/modals/dialogs in main page...`);
+        // Find all overlay containers - these cover the main page
+        const overlaySelectors = [
+            '[role="dialog"]',
+            '[role="alertdialog"]',
+            '.modal',
+            '.modal-content',
+            '.overlay',
+            '.dialog',
+            '.popup',
+            '.popover',
+            '[class*="modal"]',
+            '[class*="overlay"]',
+            '[class*="dialog"]',
+            '[class*="popup"]',
+            '[class*="popover"]',
+            '.window',
+            '[class*="window"]',
+            '.panel',
+            '[class*="panel"]',
+            '.container',
+            '[class*="container"]'
+        ];
+        for (const selector of overlaySelectors) {
+            try {
+                const overlays = await state.page.locator(selector).all();
+                if (overlays.length > 0) {
+                    log(`   🔎 Found ${overlays.length} element(s) with selector: ${selector}`);
+                }
+                // Search each overlay for the target
+                for (let overlayIdx = 0; overlayIdx < overlays.length; overlayIdx++) {
+                    const overlay = overlays[overlayIdx];
+                    try {
+                        // Check if overlay is visible (overlay must be visible to interact)
+                        let isVisible = false;
+                        try {
+                            isVisible = await overlay.isVisible();
+                        }
+                        catch {
+                            isVisible = false;
+                        }
+                        if (!isVisible)
+                            continue;
+                        const overlaySummary = `Overlay[${overlayIdx}](${selector})`;
+                        log(`   🎨 Searching in ${overlaySummary}...`);
+                        // CLICK ACTION IN OVERLAY
+                        if (action === 'click') {
+                            // Strategy 1: Find buttons/links in overlay
+                            const buttons = await overlay.locator('button, a[href], [role="button"], [onclick], input[type="button"], input[type="submit"]').all();
+                            for (const btn of buttons) {
+                                try {
+                                    const text = await btn.textContent().catch(() => '');
+                                    const ariaLabel = await btn.getAttribute('aria-label').catch(() => '');
+                                    const title = await btn.getAttribute('title').catch(() => '');
+                                    const value = await btn.getAttribute('value').catch(() => '');
+                                    const allText = `${text} ${ariaLabel} ${title} ${value}`.toLowerCase();
+                                    if (allText.includes(target.toLowerCase())) {
+                                        log(`   ✅ Found "${target}" in ${overlaySummary} (button/link)`);
+                                        try {
+                                            await btn.click({ force: true, timeout: 5000 }).catch(() => { });
+                                            log(`   ✅ [OVERLAY CLICK] Clicked: "${target}"`);
+                                            return true;
+                                        }
+                                        catch (e) {
+                                            try {
+                                                await btn.evaluate((el) => el.click());
+                                                log(`   ✅ [OVERLAY CLICK-JS] Clicked: "${target}"`);
+                                                return true;
+                                            }
+                                            catch (e2) {
+                                                // Try next button
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (e) {
+                                    // Continue to next button
+                                }
+                            }
+                            // Strategy 2: Find any element with target text in overlay (div, span, etc)
+                            const elements = await overlay.locator('div, span, p, section, article, label, table').all();
+                            const maxCheck = Math.min(elements.length, 400);
+                            for (let i = 0; i < maxCheck; i++) {
+                                try {
+                                    const el = elements[i];
+                                    const text = await el.textContent().catch(() => '');
+                                    if (text && text.toLowerCase().includes(target.toLowerCase())) {
+                                        log(`   ✅ Found "${target}" in ${overlaySummary} (text element)`);
+                                        try {
+                                            await el.click({ force: true, timeout: 5000 }).catch(() => { });
+                                            log(`   ✅ [OVERLAY CLICK-TEXT] Clicked: "${target}"`);
+                                            return true;
+                                        }
+                                        catch (e) {
+                                            try {
+                                                await el.evaluate((elm) => elm.click());
+                                                log(`   ✅ [OVERLAY CLICK-TEXT-JS] Clicked: "${target}"`);
+                                                return true;
+                                            }
+                                            catch (e2) {
+                                                // Try next element
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (e) {
+                                    // Continue
+                                }
+                            }
+                        }
+                        // FILL ACTION IN OVERLAY
+                        if (action === 'fill') {
+                            const inputs = await overlay.locator('input, textarea').all();
+                            for (const input of inputs) {
+                                try {
+                                    const title = await input.getAttribute('title').catch(() => '');
+                                    const placeholder = await input.getAttribute('placeholder').catch(() => '');
+                                    const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
+                                    const name = await input.getAttribute('name').catch(() => '');
+                                    const id = await input.getAttribute('id').catch(() => '');
+                                    const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`.toLowerCase();
+                                    if (allAttrs.includes(target.toLowerCase())) {
+                                        log(`   ✅ Found field "${target}" in ${overlaySummary}`);
+                                        try {
+                                            await input.click({ force: true }).catch(() => { });
+                                            await input.fill(fillValue || '', { force: true, timeout: 5000 }).catch(() => { });
+                                            // Dispatch events
+                                            await input.evaluate((el) => {
+                                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                                            }).catch(() => { });
+                                            log(`   ✅ [OVERLAY FILL] Filled: "${target}" = "${fillValue}"`);
+                                            return true;
+                                        }
+                                        catch (e) {
+                                            // Continue to next input
+                                        }
+                                    }
+                                }
+                                catch (e) {
+                                    // Continue
+                                }
+                            }
+                        }
+                    }
+                    catch (overlayError) {
+                        // Continue to next overlay
+                        continue;
+                    }
+                }
+            }
+            catch (selectorError) {
+                // Selector failed, try next
+                continue;
+            }
+        }
+        log(`   ℹ️ Target not found in any overlay - will search main page next`);
+        return false;
+    }
+    catch (error) {
+        log(`[OVERLAY SEARCH ERROR] ${error.message}`);
+        return false;
+    }
+}
+/**
  * Intelligently retry finding elements across frames and wait for dynamic elements
  */
 async function advancedElementSearch(target, action, fillValue, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            // PRIORITY 0: Search overlays/modals in main page FIRST (they appear on top of main content)
+            // This is crucial for Customer Maintenance forms and dialogs that overlay the main page
+            log(`\n[ATTEMPT ${attempt}/${maxRetries}] 🎨 PRIORITY 0: Searching OVERLAYS FIRST...`);
+            const overlayResult = await searchInPageOverlays(target, action, fillValue);
+            if (overlayResult) {
+                log(`✅ [FOUND IN OVERLAY] Element located and action performed`);
+                return true;
+            }
             // Step 1: Wait for dynamic element (in case it's being created)
             const dynamicFound = await waitForDynamicElement(target, 2000);
             if (dynamicFound) {
@@ -1534,13 +1717,21 @@ async function advancedElementSearch(target, action, fillValue, maxRetries = 3) 
 async function clickWithRetry(target, maxRetries = 5) {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+    // PRIORITY 0: Search OVERLAYS/MODALS in main page FIRST (they appear on top of everything)
+    // This is for elements like Customer Maintenance that overlay the main page
+    log(`\n🎨 [PRIORITY 0 - OVERLAY SEARCH] Searching for overlays/modals in main page...`);
+    const overlayResult = await searchInPageOverlays(target, 'click');
+    if (overlayResult) {
+        log(`✅ [OVERLAY CLICK SUCCESS] Clicked element in overlay: "${target}"`);
+        return true;
+    }
     // PRIORITY 1: If there's a priority subwindow open, search it FIRST before main window
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
-        log(`\n🎯 [PRIORITY SEARCH] Latest subwindow is open - searching it FIRST for target: "${target}"`);
+        log(`\n🎯 [PRIORITY 1 - SUBWINDOW SEARCH] Latest subwindow is open - searching it for target: "${target}"`);
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'click');
             if (foundInPriorityWindow) {
-                log(`✅ [PRIORITY SEARCH] Successfully clicked in priority subwindow!`);
+                log(`✅ [PRIORITY 1] Successfully clicked in priority subwindow!`);
                 return true;
             }
         }
@@ -1548,7 +1739,8 @@ async function clickWithRetry(target, maxRetries = 5) {
             log(`Priority subwindow search failed, continuing...`);
         }
     }
-    // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    // PRIORITY 2: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    log(`\n🔍 [PRIORITY 2 - ADVANCED SEARCH] Searching frames and main page...`);
     const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
     if (advancedResult) {
         return true;
@@ -1801,13 +1993,21 @@ async function clickWithRetry(target, maxRetries = 5) {
 async function fillWithRetry(target, value, maxRetries = 5) {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+    // PRIORITY 0: Search OVERLAYS/MODALS in main page FIRST (they appear on top of everything)
+    // This is for form fields inside Customer Maintenance that overlay the main page
+    log(`\n🎨 [PRIORITY 0 - OVERLAY SEARCH] Searching for field in overlays/modals...`);
+    const overlayResult = await searchInPageOverlays(target, 'fill', value);
+    if (overlayResult) {
+        log(`✅ [OVERLAY FILL SUCCESS] Filled field in overlay: "${target}" = "${value}"`);
+        return true;
+    }
     // PRIORITY 1: If there's a priority subwindow open, search it FIRST before main window
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
-        log(`\n🎯 [PRIORITY SEARCH] Latest subwindow is open - searching it FIRST for field: "${target}"`);
+        log(`\n🎯 [PRIORITY 1 - SUBWINDOW SEARCH] Latest subwindow is open - searching it for field: "${target}"`);
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'fill', value);
             if (foundInPriorityWindow) {
-                log(`✅ [PRIORITY SEARCH] Successfully filled in priority subwindow!`);
+                log(`✅ [PRIORITY 1] Successfully filled in priority subwindow!`);
                 return true;
             }
         }
@@ -1815,7 +2015,8 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             log(`Priority subwindow search failed, continuing...`);
         }
     }
-    // SECOND: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    // PRIORITY 2: Try advanced search (handles cross-origin, nested iframes, and dynamic elements)
+    log(`\n🔍 [PRIORITY 2 - ADVANCED SEARCH] Searching frames and main page...`);
     const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
     if (advancedResult) {
         return true;

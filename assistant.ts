@@ -1636,6 +1636,9 @@ async function waitForDynamicElement(target: string, timeout: number = 2000): Pr
  * These are child elements rendered on top of main content, not separate windows
  * Examples: Customer Maintenance popup, dialogs, modals rendered in overlay containers
  * PRIORITY: Search these FIRST before searching main page elements
+ * 
+ * AGGRESSIVE DETECTION: Looks for ANY visible overlay container dynamically
+ * by scanning for elements that contain known overlay title text (e.g., "Customer Maintenance")
  */
 async function searchInPageOverlays(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
@@ -1643,7 +1646,72 @@ async function searchInPageOverlays(target: string, action: 'click' | 'fill', fi
     try {
         log(`\n🎨 [OVERLAY PRIORITY] Searching for overlays/modals/dialogs in main page...`);
         
-        // Find all overlay containers - these cover the main page
+        // AGGRESSIVE APPROACH: Find all visible overlays by scanning DOM directly
+        // Look for any container that appears to be an overlay/dialog
+        const overlayContainers = await state.page.evaluate(() => {
+            const containers = [];
+            
+            // Strategy 1: Find elements with specific overlay indicators
+            const allElements = document.querySelectorAll('*');
+            
+            for (const el of Array.from(allElements)) {
+                const html = el as HTMLElement;
+                const style = window.getComputedStyle(html);
+                const zIndex = parseInt(style.zIndex || '0');
+                const position = style.position;
+                
+                // Overlay indicators:
+                // - High z-index (typically 100+)
+                // - Fixed or absolute positioning
+                // - Visible (display != none, visibility != hidden)
+                // - Contains text like "Customer Maintenance", "Dialog", etc
+                // - Has border/shadow (looks like a window)
+                
+                if (position === 'fixed' || position === 'absolute' || zIndex >= 100) {
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                        const rect = html.getBoundingClientRect();
+                        
+                        // Check if element has significant size (likely a container)
+                        if (rect.width > 200 && rect.height > 150) {
+                            // Check if element has any content that suggests it's a dialog/window
+                            const text = html.textContent || '';
+                            const classList = html.getAttribute('class') || '';
+                            
+                            // Look for window-like characteristics
+                            if (text.length > 0 && (
+                                text.includes('Customer') || 
+                                text.includes('Maintenance') ||
+                                text.includes('Dialog') ||
+                                text.includes('New') ||
+                                text.includes('Enter Query') ||
+                                classList.includes('window') ||
+                                classList.includes('modal') ||
+                                classList.includes('dialog') ||
+                                classList.includes('overlay')
+                            )) {
+                                containers.push({
+                                    text: text.substring(0, 200),
+                                    zIndex: zIndex,
+                                    position: position,
+                                    id: html.id,
+                                    className: classList,
+                                    tagName: html.tagName,
+                                    element: html
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return containers;
+        });
+
+        if (overlayContainers.length > 0) {
+            log(`   🔎 Found ${overlayContainers.length} potential overlay container(s)`);
+        }
+
+        // Also try standard selectors for known overlay patterns
         const overlaySelectors = [
             '[role="dialog"]',
             '[role="alertdialog"]',
@@ -1662,150 +1730,215 @@ async function searchInPageOverlays(target: string, action: 'click' | 'fill', fi
             '[class*="window"]',
             '.panel',
             '[class*="panel"]',
-            '.container',
-            '[class*="container"]'
+            'div[style*="z-index"]',
+            'div[style*="position"]'
         ];
 
+        const allOverlays = [];
+
+        // Collect overlays from standard selectors
         for (const selector of overlaySelectors) {
             try {
                 const overlays = await state.page.locator(selector).all();
+                allOverlays.push(...overlays);
+            } catch (e) {
+                // Selector failed, continue
+            }
+        }
+
+        log(`   🔎 Total overlay candidates to search: ${allOverlays.length}`);
+
+        // Search each overlay for the target
+        for (let overlayIdx = 0; overlayIdx < allOverlays.length; overlayIdx++) {
+            const overlay = allOverlays[overlayIdx];
+
+            try {
+                // Don't skip based on visibility - search anyway
+                // The overlay might be visible but individual elements might show as hidden
                 
-                if (overlays.length > 0) {
-                    log(`   🔎 Found ${overlays.length} element(s) with selector: ${selector}`);
-                }
+                const overlaySummary = `Overlay[${overlayIdx}]`;
+                log(`   🎨 Searching in ${overlaySummary}...`);
 
-                // Search each overlay for the target
-                for (let overlayIdx = 0; overlayIdx < overlays.length; overlayIdx++) {
-                    const overlay = overlays[overlayIdx];
-
+                // CLICK ACTION IN OVERLAY
+                if (action === 'click') {
+                    // Strategy 1: Direct JavaScript search WITHIN overlay
+                    // This bypasses Playwright's visibility checks
                     try {
-                        // Check if overlay is visible (overlay must be visible to interact)
-                        let isVisible = false;
-                        try {
-                            isVisible = await overlay.isVisible();
-                        } catch {
-                            isVisible = false;
-                        }
+                        const found = await overlay.evaluate((containerEl: any, searchTarget: string) => {
+                            const searchLower = searchTarget.toLowerCase();
+                            
+                            // Walk through ALL elements in this container
+                            const walker = document.createTreeWalker(
+                                containerEl,
+                                NodeFilter.SHOW_ELEMENT,
+                                null
+                            );
+                            
+                            let node;
+                            while (node = walker.nextNode()) {
+                                const el = node as HTMLElement;
+                                const text = el.textContent?.toLowerCase() || '';
+                                const title = el.getAttribute('title')?.toLowerCase() || '';
+                                const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+                                const onclick = el.getAttribute('onclick') || '';
+                                const className = el.className.toLowerCase();
+                                
+                                const allText = `${text} ${title} ${ariaLabel} ${className}`;
+                                
+                                // Check if target matches
+                                if (allText.includes(searchLower) || onclick.includes(searchLower)) {
+                                    // Check if element is clickable
+                                    const isClickable = (
+                                        el.tagName === 'BUTTON' || 
+                                        el.getAttribute('role') === 'button' ||
+                                        el.getAttribute('role') === 'menuitem' ||
+                                        el.tagName === 'A' ||
+                                        el.onclick !== null ||
+                                        onclick !== '' ||
+                                        className.includes('btn') ||
+                                        className.includes('button')
+                                    );
+                                    
+                                    if (isClickable) {
+                                        console.log(`[OVERLAY-JS] Found clickable: ${searchTarget}`);
+                                        el.click();
+                                        return true;
+                                    }
+                                }
+                            }
+                            
+                            return false;
+                        }, target);
                         
-                        if (!isVisible) continue;
+                        if (found) {
+                            log(`   ✅ [OVERLAY CLICK-JS] Clicked: "${target}"`);
+                            return true;
+                        }
+                    } catch (jsError) {
+                        log(`   ℹ️ JS search in overlay failed: ${jsError}`);
+                    }
 
-                        const overlaySummary = `Overlay[${overlayIdx}](${selector})`;
-                        log(`   🎨 Searching in ${overlaySummary}...`);
+                    // Strategy 2: Find buttons/links in overlay via Playwright
+                    try {
+                        const buttons = await overlay.locator('button, a[href], [role="button"], [onclick], input[type="button"], input[type="submit"], div, span').all();
+                        
+                        for (const btn of buttons.slice(0, 200)) { // Check up to 200 elements
+                            try {
+                                const text = await btn.textContent().catch(() => '');
+                                const ariaLabel = await btn.getAttribute('aria-label').catch(() => '');
+                                const title = await btn.getAttribute('title').catch(() => '');
+                                const value = await btn.getAttribute('value').catch(() => '');
 
-                        // CLICK ACTION IN OVERLAY
-                        if (action === 'click') {
-                            // Strategy 1: Find buttons/links in overlay
-                            const buttons = await overlay.locator('button, a[href], [role="button"], [onclick], input[type="button"], input[type="submit"]').all();
-                            
-                            for (const btn of buttons) {
-                                try {
-                                    const text = await btn.textContent().catch(() => '');
-                                    const ariaLabel = await btn.getAttribute('aria-label').catch(() => '');
-                                    const title = await btn.getAttribute('title').catch(() => '');
-                                    const value = await btn.getAttribute('value').catch(() => '');
+                                const allText = `${text} ${ariaLabel} ${title} ${value}`.toLowerCase();
 
-                                    const allText = `${text} ${ariaLabel} ${title} ${value}`.toLowerCase();
-
-                                    if (allText.includes(target.toLowerCase())) {
-                                        log(`   ✅ Found "${target}" in ${overlaySummary} (button/link)`);
-                                        
+                                if (allText.includes(target.toLowerCase())) {
+                                    log(`   ✅ Found "${target}" in overlay`);
+                                    
+                                    try {
+                                        await btn.click({ force: true, timeout: 5000 }).catch(() => {});
+                                        log(`   ✅ [OVERLAY CLICK] Clicked: "${target}"`);
+                                        return true;
+                                    } catch (e) {
                                         try {
-                                            await btn.click({ force: true, timeout: 5000 }).catch(() => {});
-                                            log(`   ✅ [OVERLAY CLICK] Clicked: "${target}"`);
+                                            await btn.evaluate((el: any) => el.click());
+                                            log(`   ✅ [OVERLAY CLICK-EVAL] Clicked: "${target}"`);
                                             return true;
-                                        } catch (e) {
-                                            try {
-                                                await btn.evaluate((el: any) => el.click());
-                                                log(`   ✅ [OVERLAY CLICK-JS] Clicked: "${target}"`);
-                                                return true;
-                                            } catch (e2) {
-                                                // Try next button
-                                            }
+                                        } catch (e2) {
+                                            // Continue
                                         }
                                     }
-                                } catch (e) {
-                                    // Continue to next button
                                 }
-                            }
-
-                            // Strategy 2: Find any element with target text in overlay (div, span, etc)
-                            const elements = await overlay.locator('div, span, p, section, article, label, table').all();
-                            const maxCheck = Math.min(elements.length, 400);
-                            
-                            for (let i = 0; i < maxCheck; i++) {
-                                try {
-                                    const el = elements[i];
-                                    const text = await el.textContent().catch(() => '');
-
-                                    if (text && text.toLowerCase().includes(target.toLowerCase())) {
-                                        log(`   ✅ Found "${target}" in ${overlaySummary} (text element)`);
-                                        
-                                        try {
-                                            await el.click({ force: true, timeout: 5000 }).catch(() => {});
-                                            log(`   ✅ [OVERLAY CLICK-TEXT] Clicked: "${target}"`);
-                                            return true;
-                                        } catch (e) {
-                                            try {
-                                                await el.evaluate((elm: any) => elm.click());
-                                                log(`   ✅ [OVERLAY CLICK-TEXT-JS] Clicked: "${target}"`);
-                                                return true;
-                                            } catch (e2) {
-                                                // Try next element
-                                            }
-                                        }
-                                    }
-                                } catch (e) {
-                                    // Continue
-                                }
+                            } catch (e) {
+                                // Continue
                             }
                         }
-
-                        // FILL ACTION IN OVERLAY
-                        if (action === 'fill') {
-                            const inputs = await overlay.locator('input, textarea').all();
-
-                            for (const input of inputs) {
-                                try {
-                                    const title = await input.getAttribute('title').catch(() => '');
-                                    const placeholder = await input.getAttribute('placeholder').catch(() => '');
-                                    const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
-                                    const name = await input.getAttribute('name').catch(() => '');
-                                    const id = await input.getAttribute('id').catch(() => '');
-
-                                    const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`.toLowerCase();
-
-                                    if (allAttrs.includes(target.toLowerCase())) {
-                                        log(`   ✅ Found field "${target}" in ${overlaySummary}`);
-
-                                        try {
-                                            await input.click({ force: true }).catch(() => {});
-                                            await input.fill(fillValue || '', { force: true, timeout: 5000 }).catch(() => {});
-                                            
-                                            // Dispatch events
-                                            await input.evaluate((el: any) => {
-                                                el.dispatchEvent(new Event('input', { bubbles: true }));
-                                                el.dispatchEvent(new Event('change', { bubbles: true }));
-                                                el.dispatchEvent(new Event('blur', { bubbles: true }));
-                                            }).catch(() => {});
-                                            
-                                            log(`   ✅ [OVERLAY FILL] Filled: "${target}" = "${fillValue}"`);
-                                            return true;
-                                        } catch (e) {
-                                            // Continue to next input
-                                        }
-                                    }
-                                } catch (e) {
-                                    // Continue
-                                }
-                            }
-                        }
-                    } catch (overlayError: any) {
-                        // Continue to next overlay
-                        continue;
+                    } catch (stratError) {
+                        // Continue
                     }
                 }
-            } catch (selectorError) {
-                // Selector failed, try next
+
+                // FILL ACTION IN OVERLAY
+                if (action === 'fill') {
+                    // Strategy 1: Direct JavaScript fill
+                    try {
+                        const filled = await overlay.evaluate((containerEl: any, searchTarget: string, fillVal: string) => {
+                            const searchLower = searchTarget.toLowerCase();
+                            const allInputs = containerEl.querySelectorAll('input, textarea');
+                            
+                            for (const inp of Array.from(allInputs)) {
+                                const el = inp as HTMLInputElement | HTMLTextAreaElement;
+                                const title = el.getAttribute('title')?.toLowerCase() || '';
+                                const placeholder = el.getAttribute('placeholder')?.toLowerCase() || '';
+                                const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+                                const name = el.getAttribute('name')?.toLowerCase() || '';
+                                const id = el.getAttribute('id')?.toLowerCase() || '';
+                                
+                                const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`;
+                                
+                                if (allAttrs.includes(searchLower)) {
+                                    el.value = fillVal;
+                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                    el.dispatchEvent(new Event('blur', { bubbles: true }));
+                                    console.log(`[OVERLAY-JS-FILL] Filled: ${searchTarget} = ${fillVal}`);
+                                    return true;
+                                }
+                            }
+                            
+                            return false;
+                        }, target, fillValue);
+
+                        if (filled) {
+                            log(`   ✅ [OVERLAY FILL-JS] Filled: "${target}" = "${fillValue}"`);
+                            return true;
+                        }
+                    } catch (jsError) {
+                        log(`   ℹ️ JS fill in overlay failed: ${jsError}`);
+                    }
+
+                    // Strategy 2: Playwright fill
+                    try {
+                        const inputs = await overlay.locator('input, textarea').all();
+
+                        for (const input of inputs) {
+                            try {
+                                const title = await input.getAttribute('title').catch(() => '');
+                                const placeholder = await input.getAttribute('placeholder').catch(() => '');
+                                const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
+                                const name = await input.getAttribute('name').catch(() => '');
+                                const id = await input.getAttribute('id').catch(() => '');
+
+                                const allAttrs = `${title} ${placeholder} ${ariaLabel} ${name} ${id}`.toLowerCase();
+
+                                if (allAttrs.includes(target.toLowerCase())) {
+                                    log(`   ✅ Found field "${target}" in overlay`);
+
+                                    try {
+                                        await input.click({ force: true }).catch(() => {});
+                                        await input.fill(fillValue || '', { force: true, timeout: 5000 }).catch(() => {});
+                                        
+                                        await input.evaluate((el: any) => {
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        }).catch(() => {});
+                                        
+                                        log(`   ✅ [OVERLAY FILL] Filled: "${target}" = "${fillValue}"`);
+                                        return true;
+                                    } catch (e) {
+                                        // Continue
+                                    }
+                                }
+                            } catch (e) {
+                                // Continue
+                            }
+                        }
+                    } catch (stratError) {
+                        // Continue
+                    }
+                }
+            } catch (overlayError: any) {
+                // Continue to next overlay
                 continue;
             }
         }
