@@ -666,6 +666,100 @@ async function deepDOMSearch(target: string, action: 'click' | 'fill', fillValue
  * 📊 ACCURACY: 100% - finds elements even in complex multi-frame websites
  * 🚀 SPEED: Slower than simple search but optimized for accuracy
  */
+
+/**
+ * DIAGNOSTIC: Inspect page structure and report all frames, modals, and searchable elements
+ * This helps understand WHY an element can't be found
+ */
+async function logPageStructureDiagnostics(targetSearch: string): Promise<void> {
+    if (!state.page || state.page.isClosed()) return;
+    
+    try {
+        const diagnostics = await state.page.evaluate((target) => {
+            const info: any = {
+                title: document.title,
+                url: window.location.href,
+                iframes: 0,
+                modals: 0,
+                shadowRoots: 0,
+                buttons: 0,
+                inputs: 0,
+                divButtons: 0,
+                allClickableElements: 0,
+                pageHeight: document.documentElement.scrollHeight,
+                pageWidth: document.documentElement.scrollWidth,
+                viewportHeight: window.innerHeight,
+                viewportWidth: window.innerWidth,
+                matchingElements: [] as string[]
+            };
+            
+            // Count iframes
+            info.iframes = document.querySelectorAll('iframe').length;
+            
+            // Count modal/overlay containers
+            const modalSelectors = ['[role="dialog"]', '[role="alertdialog"]', '.modal', '.overlay', '[class*="modal"]', '[class*="overlay"]', '[class*="popup"]'];
+            info.modals = modalSelectors.reduce((count, sel) => count + document.querySelectorAll(sel).length, 0);
+            
+            // Count elements with shadow DOM
+            const allElements = document.querySelectorAll('*');
+            for (let i = 0; i < allElements.length; i++) {
+                if ((allElements[i] as any).shadowRoot) info.shadowRoots++;
+            }
+            
+            // Count interactive elements
+            info.buttons = document.querySelectorAll('button').length;
+            info.inputs = document.querySelectorAll('input').length;
+            info.divButtons = document.querySelectorAll('[role="button"], [onclick]').length;
+            info.allClickableElements = document.querySelectorAll('button, [role="button"], [onclick], a[href], input[type="button"], input[type="submit"]').length;
+            
+            // Find matching elements for target
+            const searchLower = target.toLowerCase();
+            const clickables = document.querySelectorAll('button, [role="button"], [onclick], a[href], input[type="button"], input[type="submit"]');
+            for (let i = 0; i < clickables.length; i++) {
+                const el = clickables[i];
+                const text = (el.textContent || '').toLowerCase().trim();
+                const title = (el.getAttribute('title') || '').toLowerCase();
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                const id = (el.getAttribute('id') || '').toLowerCase();
+                const value = (el.getAttribute('value') || '').toLowerCase();
+                
+                if (text.includes(searchLower) || title.includes(searchLower) || aria.includes(searchLower) || 
+                    id.includes(searchLower) || value.includes(searchLower)) {
+                    // Found match - get visibility info
+                    const style = window.getComputedStyle(el);
+                    const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                    const rect = el.getBoundingClientRect();
+                    
+                    info.matchingElements.push(
+                        `${(el as any).tagName}#${id} "${text.substring(0, 30)}" [visible=${isVisible}, top=${Math.round(rect.top)}, left=${Math.round(rect.left)}]`
+                    );
+                }
+            }
+            
+            return info;
+        }, targetSearch);
+        
+        // Log diagnostics
+        log(`\n📊 === PAGE STRUCTURE DIAGNOSTICS ===`);
+        log(`   Title: ${diagnostics.title}`);
+        log(`   URL: ${diagnostics.url}`);
+        log(`   🔗 iframes: ${diagnostics.iframes}, 🪟 Modals: ${diagnostics.modals}, 👁️ Shadow Roots: ${diagnostics.shadowRoots}`);
+        log(`   📍 Clickable Elements: ${diagnostics.allClickableElements} (${diagnostics.buttons} buttons, ${diagnostics.inputs} inputs, ${diagnostics.divButtons} div-buttons)`);
+        log(`   📺 Page Size: ${diagnostics.pageWidth}x${diagnostics.pageHeight}px, Viewport: ${diagnostics.viewportWidth}x${diagnostics.viewportHeight}px`);
+        
+        if (diagnostics.matchingElements.length > 0) {
+            log(`   ✅ FOUND ${diagnostics.matchingElements.length} element(s) matching "${targetSearch}":`);
+            diagnostics.matchingElements.forEach(el => log(`      - ${el}`));
+        } else {
+            log(`   ⚠️  NO elements found matching "${targetSearch}" in main page`);
+        }
+        log(`📊 ===================================\n`);
+        
+    } catch (e: any) {
+        log(`   [DIAGNOSTIC ERROR] ${e.message}`);
+    }
+}
+
 async function searchInAllFrames(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
 
@@ -684,6 +778,11 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
         const framesToSearch = allFrames.slice(0, MAX_FRAMES); // Limit to first 15 frames
         
         if (framesToSearch.length === 0) return false;
+
+        log(`🔍 [FRAME SEARCH] Found ${framesToSearch.length} frame(s) to search`);
+        
+        // DIAGNOSTIC: Log frame details on first search of page
+        await logPageStructureDiagnostics(target);
 
         // Step 2: Build frame hierarchy (main page + nested iframes in sequence)
         const frameSequence = buildFrameSearchSequence(framesToSearch);
@@ -705,11 +804,34 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
             try {
                 // Step 3a: Validate frame accessibility
                 const isFrameValid = await validateFrameAccess(frame);
-                if (!isFrameValid) continue;
+                if (!isFrameValid) {
+                    log(`⚠️  [${framePath}] Frame not accessible, skipping...`);
+                    continue;
+                }
                 
                 // Step 3b: Wait for frame content to be ready
                 await frame.waitForLoadState('domcontentloaded').catch(() => {});
                 await frame.waitForTimeout(200); // Stability pause
+                
+                // Log frame details (URL, element count)
+                const frameDetails = await frame.evaluate(() => ({
+                    url: window.location.href,
+                    title: document.title,
+                    buttonCount: document.querySelectorAll('button').length,
+                    divButtonCount: document.querySelectorAll('[role="button"], [onclick]').length,
+                    inputCount: document.querySelectorAll('input').length,
+                    iframeCount: document.querySelectorAll('iframe').length,
+                    allClickable: document.querySelectorAll('button, [role="button"], [onclick], a[href], input[type="button"], input[type="submit"]').length
+                })).catch(() => null);
+                
+                if (frameDetails) {
+                    log(`   📄 Frame content: ${frameDetails.allClickable} clickable elements (${frameDetails.buttonCount} buttons, ${frameDetails.divButtonCount} div-buttons, ${frameDetails.inputCount} inputs)`);
+                    if (frameDetails.iframeCount > 0) {
+                        log(`   🔗 This frame contains ${frameDetails.iframeCount} nested iframe(s)`);
+                    }
+                }
+                
+                log(`🔍 [${framePath}] Searching for: "${target}"`);
                 
                 // Step 3c: Execute targeted search based on action type
                 if (action === 'click') {
@@ -725,12 +847,14 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
                 
             } catch (frameError: any) {
                 // Frame error - continue to next frame in sequence
+                log(`⚠️  [${framePath}] Error during search: ${frameError.message}`);
                 continue;
             }
         }
 
         return false;
     } catch (error: any) {
+        log(`❌ Frame search error: ${error.message}`);
         return false;
     }
 }
@@ -1008,78 +1132,195 @@ async function validateFrameAccess(frame: any): Promise<boolean> {
 
 /**
  * Execute CLICK action in frame with sequential pattern matching
- * ENHANCED: Better detection for subwindow elements
+ * ENHANCED: Better detection for subwindow elements and nested iframes
  * 
  * KEY PRINCIPLE: If it's visible on screen, it must be clickable
  * - Searches ALL elements without visibility restrictions
  * - Handles overlaid, hidden, nested elements
  * - Forces clicks even if elements appear "invisible" to Playwright
+ * - Special handling for common button IDs and Start button variations
  */
 async function executeClickInFrame(frame: any, target: string, framePath: string): Promise<boolean> {
     const targetLower = target.toLowerCase();
     
     try {
-        // **PRIORITY CHECK**: If target matches known button IDs, try direct ID lookup first
+        // **PRIORITY CHECK 1**: Try known button ID patterns first
         const knownButtonIds = {
-            'start': 'startBtn',
-            'stop': 'stopBtn'
+            'start': ['startBtn', 'start_btn', 'start-btn', 'btnStart', 'startButton', 'button_start'],
+            'stop': ['stopBtn', 'stop_btn', 'stop-btn', 'btnStop', 'stopButton', 'button_stop']
         };
         
-        if (knownButtonIds[targetLower as keyof typeof knownButtonIds]) {
-            const buttonId = knownButtonIds[targetLower as keyof typeof knownButtonIds];
-            try {
-                // Method 1: Try Playwright click first
-                const btn = await frame.locator(`#${buttonId}`).first();
-                await btn.click({ force: true, timeout: 5000 }).catch(() => {});
-                
-                // Method 2: If Method 1 didn't work, manually invoke the onclick handler via JavaScript
-                const clicked = await frame.evaluate((id) => {
-                    const el = document.getElementById(id) as HTMLButtonElement;
-                    if (el) {
-                        // Try direct click first
+        const targetKey = targetLower.split(/\s+/)[0]; // Get first word
+        if (knownButtonIds[targetKey as keyof typeof knownButtonIds]) {
+            const buttonIds = knownButtonIds[targetKey as keyof typeof knownButtonIds];
+            
+            for (const buttonId of buttonIds) {
+                try {
+                    // Method 1: Try Playwright force click
+                    const btn = await frame.locator(`#${buttonId}`).first();
+                    const count = await btn.count().catch(() => 0);
+                    if (count > 0) {
                         try {
-                            el.click();
+                            await btn.click({ force: true, timeout: 5000 });
+                            log(`✅ [DIRECT-ID${framePath}] Successfully clicked button via ID: "#${buttonId}" (target: "${target}")`);
+                            await frame.waitForTimeout(500);
                             return true;
                         } catch (e1) {
-                            // Try dispatchEvent
+                            // Continue to JavaScript method
+                        }
+                    }
+                    
+                    // Method 2: Try JavaScript direct click
+                    const clicked = await frame.evaluate((id) => {
+                        const el = document.getElementById(id) as HTMLButtonElement;
+                        if (el) {
                             try {
-                                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                el.click();
                                 return true;
-                            } catch (e2) {
-                                // Try calling onclick directly if it exists
-                                if (el.onclick) {
-                                    try {
-                                        el.onclick(new MouseEvent('click') as any);
-                                        return true;
-                                    } catch (e3) {
-                                        return false;
+                            } catch (e1) {
+                                try {
+                                    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                    return true;
+                                } catch (e2) {
+                                    if (el.onclick) {
+                                        try {
+                                            el.onclick(new MouseEvent('click') as any);
+                                            return true;
+                                        } catch (e3) {
+                                            return false;
+                                        }
                                     }
+                                    return false;
                                 }
-                                return false;
+                            }
+                        }
+                        return false;
+                    }, buttonId);
+                    
+                    if (clicked) {
+                        log(`✅ [DIRECT-ID-JS${framePath}] Successfully clicked button via ID (JavaScript): "#${buttonId}" (target: "${target}")`);
+                        await frame.waitForTimeout(500);
+                        return true;
+                    }
+                } catch (e) {
+                    // Continue to next button ID
+                }
+            }
+        }
+        
+        // **PRIORITY CHECK 2**: Search by attribute patterns commonly used for Start button
+        try {
+            const startButtonPatterns = [
+                'button:has-text("Start")',
+                'button[aria-label*="Start"]',
+                'button[title*="Start"]',
+                'button[data-testid*="Start"]',
+                '[role="button"]:has-text("Start")',
+                'button[class*="start"]'
+            ];
+            
+            if (targetLower.includes('start')) {
+                for (const pattern of startButtonPatterns) {
+                    try {
+                        const elements = await frame.locator(pattern).all();
+                        for (const el of elements) {
+                            try {
+                                const isVisible = await el.isVisible().catch(() => false);
+                                if (isVisible) {
+                                    await el.scrollIntoViewIfNeeded();
+                                    await el.click({ force: true, timeout: 5000 });
+                                    log(`✅ [START-PATTERN${framePath}] Clicked Start button using pattern: "${pattern}"`);
+                                    await frame.waitForTimeout(500);
+                                    return true;
+                                }
+                            } catch (e) {
+                                // Try next element
+                            }
+                        }
+                    } catch (e) {
+                        // Pattern failed, try next
+                    }
+                }
+            }
+        } catch (e) {
+            // Pattern search failed
+        }
+
+        // **PRIORITY CHECK 3**: Enhanced multi-pattern button search in ALL visible clickable elements
+        try {
+            // Get ALL potentially clickable elements
+            const clickableElements = await frame.locator(
+                'button, [role="button"], input[type="button"], input[type="submit"], a[href], [onclick], div[onclick], span[onclick], [style*="cursor:pointer"]'
+            ).all();
+            
+            log(`   [Frame search] Found ${clickableElements.length} clickable elements to check`);
+            
+            for (let i = 0; i < clickableElements.length; i++) {
+                try {
+                    const el = clickableElements[i];
+                    
+                    // Get all text attributes
+                    const text = await el.textContent().catch(() => '');
+                    const ariaLabel = await el.getAttribute('aria-label').catch(() => '');
+                    const title = await el.getAttribute('title').catch(() => '');
+                    const dataTestId = await el.getAttribute('data-testid').catch(() => '');
+                    const value = await el.getAttribute('value').catch(() => '');
+                    const id = await el.getAttribute('id').catch(() => '');
+                    const className = await el.getAttribute('class').catch(() => '');
+                    const innerHTML = await el.innerHTML().catch(() => '');
+                    
+                    // Combine all searchable text
+                    const allText = `${text} ${ariaLabel} ${title} ${dataTestId} ${value} ${id} ${className} ${innerHTML}`.toLowerCase();
+                    
+                    // Check if target matches
+                    if (allText.includes(targetLower)) {
+                        // Try to click with multiple methods
+                        try {
+                            // Method 1: Force click
+                            await el.click({ force: true, timeout: 5000 }).catch(() => {});
+                            log(`✅ [ENHANCED${framePath}] Clicked element: "${target}"`);
+                            await frame.waitForTimeout(500);
+                            return true;
+                        } catch (e1) {
+                            // Method 2: JavaScript click
+                            try {
+                                const clicked = await el.evaluate((element: any) => {
+                                    try {
+                                        element.click();
+                                        return true;
+                                    } catch (e) {
+                                        element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                        return true;
+                                    }
+                                });
+                                if (clicked) {
+                                    log(`✅ [ENHANCED-JS${framePath}] Clicked element (JavaScript): "${target}"`);
+                                    await frame.waitForTimeout(500);
+                                    return true;
+                                }
+                            } catch (e2) {
+                                // Continue to next element
                             }
                         }
                     }
-                    return false;
-                }, buttonId);
-                
-                if (clicked) {
-                    log(`✅ [DIRECT-ID${framePath}] Successfully clicked button via ID: "${target}"`);
-                    await frame.waitForTimeout(500); // Wait for action to complete
-                    return true;
+                } catch (e) {
+                    // Try next element
                 }
-            } catch (e) {
-                // Continue with regular search
             }
+        } catch (e) {
+            // Priority check 3 failed
         }
 
         // PATTERN 0: ULTRA AGGRESSIVE DEEP SEARCH - NO VISIBILITY RESTRICTIONS
         // This searches EVERY element in the entire frame, including hidden/overlaid ones
+        // ENHANCED: Now searches nested iframes and shadow DOM
         try {
             const found = await frame.evaluate((searchText) => {
                 const searchLower = searchText.toLowerCase();
                 let elementsChecked = 0;
+                let foundMatch: HTMLElement | null = null;
                 
-                // Strategy 1: Direct element walk - check EVERYTHING
+                // Strategy 1: Direct element walk - check EVERYTHING recursively
                 const walk = (node: any): boolean => {
                     if (node.nodeType === 1) { // Element node
                         elementsChecked++;
@@ -1091,40 +1332,61 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                         const onclick = el.getAttribute('onclick') || '';
                         const id = (el.getAttribute('id') || '').toLowerCase();
                         const className = (el.getAttribute('class') || '').toLowerCase();
+                        const value = (el.getAttribute('value') || '').toLowerCase();
+                        const name = (el.getAttribute('name') || '').toLowerCase();
                         
-                        // Create comprehensive search space
-                        const allText = `${text} ${title} ${ariaLabel} ${dataTestId} ${id} ${className}`;
+                        // Create comprehensive search space - include more attributes
+                        const allText = `${text} ${title} ${ariaLabel} ${dataTestId} ${id} ${className} ${value} ${name}`;
                         
                         // Match if target found in any attribute or text
                         if (allText.includes(searchLower) || onclick.includes(searchLower)) {
-                            // Match if element is clickable
+                            // Match if element is clickable - EXPANDED criteria
                             const isClickable = (
                                 el.tagName === 'BUTTON' || 
+                                el.tagName === 'INPUT' ||
+                                el.tagName === 'A' || 
                                 el.getAttribute('role') === 'button' || 
                                 el.getAttribute('role') === 'menuitem' ||
                                 el.getAttribute('role') === 'tab' ||
-                                el.tagName === 'A' || 
+                                el.getAttribute('role') === 'link' ||
                                 el.onclick !== null || 
                                 el.getAttribute('onclick') ||
                                 el.className.includes('btn') ||
                                 el.className.includes('button') ||
-                                el.style.cursor === 'pointer'
+                                el.className.includes('clickable') ||
+                                el.style.cursor === 'pointer' ||
+                                el.style.cursor === 'hand'
                             );
                             
                             if (isClickable) {
+                                foundMatch = el; // Store first match
                                 // IMPORTANT: Try to click directly in JavaScript
                                 // This bypasses visibility checks - works for overlaid/hidden elements
                                 try {
                                     el.click();
                                     return true;
                                 } catch (e) {
-                                    // If normal click fails, try scrollIntoView then click
+                                    // If normal click fails, try multiple fallback methods
                                     try {
                                         el.scrollIntoView({ behavior: 'auto', block: 'center' });
                                         el.click();
                                         return true;
                                     } catch (e2) {
-                                        // Continue to next element
+                                        // Try dispatchEvent
+                                        try {
+                                            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                            return true;
+                                        } catch (e3) {
+                                            // Try calling onclick handler if it exists
+                                            if (el.onclick) {
+                                                try {
+                                                    el.onclick(new MouseEvent('click') as any);
+                                                    return true;
+                                                } catch (e4) {
+                                                    // Continue searching
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1135,17 +1397,25 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                     for (let child of node.childNodes) {
                         if (walk(child)) return true;
                     }
+                    
+                    // Check shadow DOM if available
+                    if (node.shadowRoot) {
+                        for (let child of node.shadowRoot.childNodes) {
+                            if (walk(child)) return true;
+                        }
+                    }
+                    
                     return false;
                 };
                 
                 // Start from document root and walk ENTIRE tree
                 const result = walk(document);
                 console.log(`[DEEP SEARCH] Checked ${elementsChecked} elements for "${searchText}"`);
-                return result;
+                return { found: result, count: elementsChecked };
             }, target);
             
-            if (found) {
-                log(`✅ [DEEP SEARCH${framePath}] Found and clicked: "${target}" (NO visibility restrictions)`);
+            if (found && found.found) {
+                log(`✅ [DEEP SEARCH${framePath}] Found and clicked: "${target}" (NO visibility restrictions, searched ${found.count} elements)`);
                 return true;
             }
         } catch (e: any) {
