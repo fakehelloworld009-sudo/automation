@@ -350,7 +350,11 @@ async function findButtonByText(text: string): Promise<string | null> {
         async () => `[role="button"]:has-text("${text}")`,
         async () => `input[type="button"][value*="${text}"]`,
         async () => `button span:has-text("${text}")`,
-        async () => `div[role="button"]:has-text("${text}")`
+        async () => `div[role="button"]:has-text("${text}")`,
+        async () => `input[type="radio"] + label:has-text("${text}")`,
+        async () => `input[type="checkbox"] + label:has-text("${text}")`,
+        async () => `label:has-text("${text}") input[type="radio"]`,
+        async () => `label:has-text("${text}") input[type="checkbox"]`
     ];
 
     for (const strategyFunc of strategies) {
@@ -1015,6 +1019,178 @@ async function searchInLaunchWinFrames(target: string, action: 'click' | 'fill',
     }
 }
 
+/**
+ * UNIVERSAL IFRAME SEARCH - Works for ANY iframe on ANY website
+ * Discovers all iframes dynamically, logs their names/IDs, and searches them with robust fallbacks
+ */
+async function searchAllDiscoveredIframes(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        // STEP 1: Discover ALL iframes on the page (any name, any pattern)
+        const allIframes = await state.page.locator('iframe').all();
+        
+        if (allIframes.length === 0) {
+            return false;
+        }
+
+        log(`\n🔎 [UNIVERSAL IFRAME DISCOVERY] Found ${allIframes.length} iframe(s) on page:`);
+        
+        // STEP 2: Log all discovered iframe names/IDs for debugging
+        const discoveredIframes: { id: string; name: string; index: number }[] = [];
+        for (let i = 0; i < allIframes.length; i++) {
+            const iframeId = await allIframes[i].getAttribute('id').catch(() => `iframe_${i}`);
+            const iframeName = await allIframes[i].getAttribute('name').catch(() => 'unnamed');
+            discoveredIframes.push({ id: iframeId || `iframe_${i}`, name: iframeName || 'unnamed', index: i });
+            log(`   [${i}] ID: "${iframeId || 'none'}" | Name: "${iframeName || 'unnamed'}"`);
+        }
+
+        // STEP 3: Search each discovered iframe with universal logic
+        for (let idx = 0; idx < allIframes.length; idx++) {
+            try {
+                const iframeElement = allIframes[idx];
+                const iframeInfo = discoveredIframes[idx];
+                const frameId = iframeInfo.id;
+                const frameName = iframeInfo.name;
+
+                // Wait for iframe to load
+                await iframeElement.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                await state.page.waitForTimeout(300);
+
+                log(`\n   📍 Searching iframe [${idx}]: ${frameId} (name: "${frameName}")`);
+
+                // Access frame content
+                const frameSelector = `iframe[id="${frameId}"], iframe[name="${frameName}"]`;
+                const iframeLocator = state.page.frameLocator(frameSelector).first();
+
+                // Wait for body to be ready
+                await iframeLocator.locator('body').waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+
+                // FOR CLICK ACTION
+                if (action === 'click') {
+                    const clickables = await iframeLocator.locator('button, [role="button"], input[type="button"], input[type="submit"], input[type="radio"], input[type="checkbox"], a, [onclick], div[onclick], label').all();
+                    
+                    log(`      🔍 Found ${clickables.length} clickable elements`);
+
+                    for (const elem of clickables) {
+                        try {
+                            const isVisible = await elem.isVisible().catch(() => false);
+                            if (!isVisible) continue;
+
+                            const boundingBox = await elem.boundingBox().catch(() => null);
+                            if (!boundingBox) continue;
+
+                            const text = await elem.textContent().catch(() => '');
+                            const value = await elem.getAttribute('value').catch(() => '');
+                            const title = await elem.getAttribute('title').catch(() => '');
+                            const ariaLabel = await elem.getAttribute('aria-label').catch(() => '');
+                            
+                            const allText = `${text} ${value} ${title} ${ariaLabel}`.toLowerCase();
+
+                            if (allText.includes(target.toLowerCase())) {
+                                log(`      ✓ FOUND VISIBLE: "${text.trim()}" - Clicking...`);
+
+                                // Try Playwright click first
+                                try {
+                                    await elem.click({ force: true, timeout: 3000 });
+                                    log(`      ✅ [UNIVERSAL-CLICK] Successfully clicked in ${frameId}`);
+                                    await state.page.waitForTimeout(500);
+                                    return true;
+                                } catch (clickErr: any) {
+                                    log(`      ⚠️  Playwright click failed, trying JavaScript...`);
+                                    
+                                    // Fallback: JavaScript click
+                                    try {
+                                        await elem.evaluate((el: any) => {
+                                            (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            (el as HTMLElement).click();
+                                        });
+                                        log(`      ✅ [UNIVERSAL-CLICK-JS] JavaScript click succeeded in ${frameId}`);
+                                        await state.page.waitForTimeout(500);
+                                        return true;
+                                    } catch (jsErr: any) {
+                                        log(`      ⚠️  JavaScript click also failed: ${jsErr.message}`);
+                                    }
+                                }
+                            }
+                        } catch (elemErr: any) {
+                            // Continue to next element
+                        }
+                    }
+                }
+
+                // FOR FILL ACTION
+                else if (action === 'fill' && fillValue) {
+                    const inputs = await iframeLocator.locator('input[type="text"], textarea, input:not([type])').all();
+                    
+                    log(`      🔍 Found ${inputs.length} input fields`);
+
+                    for (const input of inputs) {
+                        try {
+                            const isVisible = await input.isVisible().catch(() => false);
+                            if (!isVisible) continue;
+
+                            const boundingBox = await input.boundingBox().catch(() => null);
+                            if (!boundingBox) continue;
+
+                            const placeholder = await input.getAttribute('placeholder').catch(() => '');
+                            const title = await input.getAttribute('title').catch(() => '');
+                            const name = await input.getAttribute('name').catch(() => '');
+                            const id = await input.getAttribute('id').catch(() => '');
+                            const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
+                            
+                            const allText = `${placeholder} ${title} ${name} ${id} ${ariaLabel}`.toLowerCase();
+
+                            if (allText.includes(target.toLowerCase())) {
+                                log(`      ✓ FOUND INPUT: "${title || placeholder || name}" - Filling with "${fillValue}"`);
+
+                                // Try Playwright fill first
+                                let filled = false;
+                                try {
+                                    await input.fill(fillValue, { timeout: 2000 });
+                                    filled = true;
+                                    log(`      ✅ [UNIVERSAL-FILL] Successfully filled in ${frameId}`);
+                                    await state.page.waitForTimeout(300);
+                                    return true;
+                                } catch (fillErr: any) {
+                                    log(`      ⚠️  Playwright fill failed, trying JavaScript...`);
+                                }
+
+                                // Fallback: JavaScript fill (works for readonly fields too!)
+                                if (!filled) {
+                                    try {
+                                        await input.evaluate((el: any, val: string) => {
+                                            (el as HTMLInputElement).value = val;
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        }, fillValue);
+                                        log(`      ✅ [UNIVERSAL-FILL-JS] JavaScript fill succeeded in ${frameId}`);
+                                        await state.page.waitForTimeout(300);
+                                        return true;
+                                    } catch (jsErr: any) {
+                                        log(`      ⚠️  JavaScript fill also failed: ${jsErr.message}`);
+                                    }
+                                }
+                            }
+                        } catch (elemErr: any) {
+                            // Continue to next input
+                        }
+                    }
+                }
+
+            } catch (iframeErr: any) {
+                log(`      ⚠️  Error searching iframe: ${iframeErr.message}`);
+            }
+        }
+
+        return false;
+    } catch (error: any) {
+        log(`🔎 [UNIVERSAL IFRAME ERROR] ${error.message}`);
+        return false;
+    }
+}
+
 async function searchInAllFrames(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
 
@@ -1039,11 +1215,10 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
         // DIAGNOSTIC: Log frame details on first search of page
         await logPageStructureDiagnostics(target);
 
-        // **SPECIAL HANDLER**: Search LaunchWin iframes FIRST (Customer Maintenance windows)
-        // These are special Oracle Forms windows that contain important dialogs
-        const launchWinResult = await searchInLaunchWinFrames(target, action, fillValue);
-        if (launchWinResult) {
-            log(`✅ [LAUNCHWIN-IFRAME] Found and executed action in Customer Maintenance window!`);
+        // **UNIVERSAL IFRAME SEARCH**: Use the new universal function that works with ANY iframe
+        // This discovers all iframes automatically and searches them with robust fallbacks
+        const universalResult = await searchAllDiscoveredIframes(target, action, fillValue);
+        if (universalResult) {
             return true;
         }
 
@@ -3044,14 +3219,18 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                             const style = window.getComputedStyle(el);
                             // Check if visible (not hidden, not display none, not visibility hidden)
                             if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
-                                if (
-                                    el.tagName === 'BUTTON' ||
+                                const isButton = el.tagName === 'BUTTON' ||
                                     el.tagName === 'A' ||
                                     el.getAttribute('role') === 'button' ||
                                     el.getAttribute('role') === 'tab' ||
                                     el.getAttribute('onclick') !== null ||
-                                    (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')
-                                ) {
+                                    (el.tagName === 'INPUT' && (el.getAttribute('type') === 'button' || el.getAttribute('type') === 'submit'));
+                                
+                                const isRadioOrCheckbox = el.tagName === 'INPUT' && (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox');
+                                
+                                const isLabel = el.tagName === 'LABEL' && searchText.toLowerCase().split(/\s+/).every(word => el.textContent?.toLowerCase().includes(word));
+                                
+                                if (isButton || isRadioOrCheckbox || isLabel) {
                                     const rect = (el as HTMLElement).getBoundingClientRect();
                                     // Only consider elements that are actually visible
                                     if (rect.width > 0 && rect.height > 0) {
@@ -3122,18 +3301,24 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                     const walk = (node: any) => {
                         if (node.nodeType === 1) { // Element node
                             const el = node as HTMLElement;
-                            if (el.textContent?.includes(searchText) && (
-                                el.tagName === 'BUTTON' ||
-                                el.tagName === 'A' ||
-                                el.getAttribute('role') === 'button' ||
-                                el.getAttribute('role') === 'tab' ||
-                                el.getAttribute('onclick') !== null
-                            )) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    el.click();
-                                    return true;
+                            if (el.textContent?.includes(searchText)) {
+                                const isButton = el.tagName === 'BUTTON' ||
+                                    el.tagName === 'A' ||
+                                    el.getAttribute('role') === 'button' ||
+                                    el.getAttribute('role') === 'tab' ||
+                                    el.getAttribute('onclick') !== null;
+                                
+                                const isRadioOrCheckbox = el.tagName === 'INPUT' && (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox');
+                                
+                                const isLabel = el.tagName === 'LABEL' && searchText.toLowerCase().split(/\s+/).every(word => el.textContent?.toLowerCase().includes(word));
+                                
+                                if (isButton || isRadioOrCheckbox || isLabel) {
+                                    const rect = el.getBoundingClientRect();
+                                    if (rect.width > 0 && rect.height > 0) {
+                                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        el.click();
+                                        return true;
+                                    }
                                 }
                             }
                             // Check shadow root
@@ -3173,11 +3358,18 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                 for (const el of Array.from(allElements)) {
                                     const element = el as HTMLElement;
                                     const text = element.textContent || '';
-                                    const isClickable = element.tagName === 'BUTTON' ||
+                                    
+                                    const isButton = element.tagName === 'BUTTON' ||
                                         element.tagName === 'A' ||
                                         element.getAttribute('role') === 'button' ||
                                         element.getAttribute('onclick') !== null ||
                                         element.getAttribute('role') === 'tab';
+                                    
+                                    const isRadioOrCheckbox = element.tagName === 'INPUT' && (element.getAttribute('type') === 'radio' || element.getAttribute('type') === 'checkbox');
+                                    
+                                    const isLabel = element.tagName === 'LABEL' && searchText.toLowerCase().split(/\s+/).every(word => text.toLowerCase().includes(word));
+                                    
+                                    const isClickable = isButton || isRadioOrCheckbox || isLabel;
                                     
                                     if (text.toLowerCase().includes(searchText.toLowerCase()) && isClickable) {
                                         const rect = element.getBoundingClientRect();
