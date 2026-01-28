@@ -322,6 +322,40 @@ async function detectAndLogModals(): Promise<void> {
 }
 
 /**
+ * Log current window name and available iframes (simplified, no modals)
+ */
+async function logWindowAndFrameInfo(): Promise<void> {
+    try {
+        if (!state.page || state.page.isClosed()) return;
+
+        // Get current window context
+        let windowName = 'MAIN WINDOW';
+        if (allPages.length > 1) {
+            const currentPageIndex = allPages.indexOf(state.page);
+            if (currentPageIndex > 0) {
+                windowName = `SUBWINDOW ${currentPageIndex}`;
+            }
+        }
+        
+        log(`\n📍 Current Context: ${windowName}`);
+        
+        // Get iframe names
+        const iframes = await state.page.locator('iframe').all();
+        if (iframes.length > 0) {
+            const iframeNames: string[] = [];
+            for (const iframe of iframes) {
+                const name = await iframe.getAttribute('name').catch(() => 'unnamed');
+                const id = await iframe.getAttribute('id').catch(() => 'no-id');
+                iframeNames.push(`${name || 'unnamed'} (id: ${id || 'no-id'})`);
+            }
+            log(`   📊 Available iframes: ${iframeNames.join(' | ')}`);
+        }
+    } catch (e: any) {
+        // Silent fail
+    }
+}
+
+/**
  * Build a visual string representation of window hierarchy
  */
 function buildHierarchyString(): string {
@@ -985,6 +1019,10 @@ async function searchAllDiscoveredIframes(target: string, action: 'click' | 'fil
                     
                     log(`      🔍 Found ${clickables.length} clickable elements`);
 
+                    let foundMatches = 0;
+                    const targetLower = target.toLowerCase();
+                    const debugMatches: string[] = [];
+                    
                     for (const elem of clickables) {
                         try {
                             const isVisible = await elem.isVisible().catch(() => false);
@@ -1000,16 +1038,30 @@ async function searchAllDiscoveredIframes(target: string, action: 'click' | 'fil
                             
                             const allText = `${text} ${value} ${title} ${ariaLabel}`.toLowerCase();
                             const trimmedText = text.trim().toLowerCase();
-                            const targetLower = target.toLowerCase();
                             
-                            // For short targets (<=3 chars), require STRICTER exact match
-                            // Check if trimmed text equals target OR if a single space-separated word matches exactly
-                            const isMatch = target.length <= 3 ? 
-                                (trimmedText === targetLower || trimmedText.split(/\s+/).some(word => word === targetLower)) :
-                                allText.includes(targetLower);
+                            // For SINGLE CHARACTER: ONLY exact match (prevent "P" matching "Expand")
+                            // For 2-3 chars: Allow exact match OR word match
+                            // For longer: Allow substring match
+                            let isMatch = false;
+                            if (target.length === 1) {
+                                // Single char: ONLY exact full text match
+                                isMatch = trimmedText === targetLower;
+                            } else if (target.length <= 3) {
+                                // 2-3 chars: exact match OR word match
+                                isMatch = (trimmedText === targetLower || trimmedText.split(/\s+/).some(word => word === targetLower));
+                            } else {
+                                // Longer: substring match
+                                isMatch = allText.includes(targetLower);
+                            }
+                            
+                            // DEBUG: For single-char searches, log ALL elements containing that letter
+                            if (target.length === 1 && (allText.includes(targetLower))) {
+                                debugMatches.push(`"${text}" [trimmed="${trimmedText}" | contains="${targetLower}": ${isMatch ? 'YES MATCH' : 'NO MATCH'}]`);
+                            }
 
                             if (isMatch) {
-                                log(`      ✓ FOUND VISIBLE: "${text.trim()}" - Clicking...`);
+                                foundMatches++;
+                                log(`      ✓ MATCH ${foundMatches}: "${text.trim()}" [text="${text}" | trimmed="${trimmedText}" | value="${value}" | title="${title}" | allText="${allText}"]`);
 
                                 // Try Playwright click first
                                 try {
@@ -1038,6 +1090,15 @@ async function searchAllDiscoveredIframes(target: string, action: 'click' | 'fil
                             // Continue to next element
                         }
                     }
+                    
+                    // Show debug info for single-char searches
+                    if (target.length === 1 && debugMatches.length > 0) {
+                        log(`      📊 DEBUG: Elements containing "${targetLower}" (not matching exact):`);
+                        debugMatches.forEach(match => log(`         ${match}`));
+                    }
+                    if (foundMatches === 0) {
+                        log(`      ⚠️  No matches found for "${target}" in ${clickables.length} clickable elements`);
+                    }
                 }
 
                 // FOR FILL ACTION
@@ -1061,11 +1122,22 @@ async function searchAllDiscoveredIframes(target: string, action: 'click' | 'fil
                             const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
                             
                             const allText = `${placeholder} ${title} ${name} ${id} ${ariaLabel}`.toLowerCase();
+                            const targetLower = target.toLowerCase();
                             
-                            // For short targets (<=3 chars), require exact match; for longer text, use contains
-                            const isMatch = target.length <= 3 ?
-                                allText.split(/\s+/).some(word => word === target.toLowerCase()) :
-                                allText.includes(target.toLowerCase());
+                            // For SINGLE CHARACTER: ONLY exact word match
+                            // For 2-3 chars: Allow word match
+                            // For longer: Allow substring match
+                            let isMatch = false;
+                            if (target.length === 1) {
+                                // Single char: ONLY exact word match - prevent "A" matching "Name" or "Table"
+                                isMatch = allText.split(/\s+/).some(word => word === targetLower && word.length === 1);
+                            } else if (target.length <= 3) {
+                                // 2-3 chars: word match
+                                isMatch = allText.split(/\s+/).some(word => word === targetLower);
+                            } else {
+                                // Longer: substring match
+                                isMatch = allText.includes(targetLower);
+                            }
 
                             if (isMatch) {
                                 log(`      ✓ FOUND INPUT: "${title || placeholder || name}" - Filling with "${fillValue}"`);
@@ -2733,6 +2805,12 @@ async function searchInPageOverlays(target: string, action: 'click' | 'fill', fi
                         continue;
                     }
                     
+                    // For SINGLE CHARACTER searches: ONLY exact match - no word or substring matching
+                    // This prevents "P" from matching "Expand" or other words containing P
+                    if (searchLower.length === 1) {
+                        continue; // Skip this element - we already checked exact matches above
+                    }
+                    
                     // WORD MATCH: Target is a complete word in the text (not substring)
                     const words = text.split(/\s+/);
                     if (words.includes(searchLower)) {
@@ -2750,6 +2828,13 @@ async function searchInPageOverlays(target: string, action: 'click' | 'fill', fi
                 // Try exact matches FIRST (highest priority)
                 if (exactMatches.length > 0) {
                     const el = exactMatches[0];
+                    const tagName = el.tagName;
+                    const id = el.getAttribute('id') || 'no-id';
+                    const classList = el.getAttribute('class') || 'no-class';
+                    const clickText = (el.textContent || '').trim().substring(0, 50);
+                    
+                    console.log(`[OVERLAY-CLICK-DEBUG] Exact match found: <${tagName} id="${id}" class="${classList}"> text="${clickText}"`);
+                    
                     try {
                         el.click();
                         return { found: true, action: 'click', target: searchText };
@@ -3189,37 +3274,27 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
 
-    // **CHANGED PRIORITY ORDER**
-    // Search OVERLAYS FIRST - if an overlay is visible, elements inside it take priority
-    // This prevents clicking main page elements when an overlay form is open
-    const overlayResult = await searchInPageOverlays(target, 'click');
-    if (overlayResult) {
-        log(`✅ [OVERLAY CLICK SUCCESS] Clicked element in overlay: "${target}"`);
-        return true;
-    }
-
-    // PRIORITY 2: Search MAIN PAGE & FRAMES if overlay search failed
-    // This handles normal elements like "Go", "New" button on main page
-    log(`\n🔍 [PRIORITY 2 - MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
+    // Search all windows/frames/iframes with EQUAL PRIORITY
+    // No special priority for overlays - search everything uniformly
+    log(`\n🔍 Searching for: "${target}"`);
+    
     const mainPageResult = await searchInAllFrames(target, 'click');
     if (mainPageResult) {
         return true;
     }
 
-    // PRIORITY 3: Try advanced fallback search
-    log(`\n🔍 [PRIORITY 3 - ADVANCED SEARCH] Searching using fallback methods...`);
+    // Try advanced fallback search
     const advancedResult = await advancedElementSearch(target, 'click', undefined, 2);
     if (advancedResult) {
         return true;
     }
 
-    // PRIORITY 4: If there's a priority subwindow open, search it
+    // Search subwindows with equal priority
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
-        log(`\n🎯 [PRIORITY 4 - SUBWINDOW SEARCH] Latest subwindow is open - searching for target: "${target}"`);
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'click');
             if (foundInPriorityWindow) {
-                log(`✅ [PRIORITY 4] Successfully clicked in subwindow!`);
+                log(`✅ Successfully clicked in subwindow!`);
                 return true;
             }
         } catch (e) {
@@ -3590,37 +3665,27 @@ async function fillWithRetry(target: string, value: string, maxRetries: number =
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
 
-    // **CHANGED PRIORITY ORDER**
-    // Search OVERLAYS FIRST - if an overlay form is visible, search it first
-    // This prevents filling wrong fields on main page when overlay is open
-    const overlayResult = await searchInPageOverlays(target, 'fill', value);
-    if (overlayResult) {
-        log(`✅ [OVERLAY FILL SUCCESS] Filled field in overlay: "${target}" = "${value}"`);
-        return true;
-    }
-
-    // PRIORITY 2: Search MAIN PAGE & FRAMES if overlay search failed
-    // This handles normal form fields on the main page
-    log(`\n🔍 [PRIORITY 2 - MAIN PAGE SEARCH] Searching main page & frames for: "${target}"`);
+    // Search all windows/frames/iframes with EQUAL PRIORITY
+    // No special priority for overlays - search everything uniformly
+    log(`\n🔍 Searching for: "${target}"`);
+    
     const mainPageResult = await searchInAllFrames(target, 'fill', value);
     if (mainPageResult) {
         return true;
     }
 
-    // PRIORITY 3: Try advanced fallback search
-    log(`\n🔍 [PRIORITY 3 - ADVANCED SEARCH] Searching using fallback methods...`);
+    // Try advanced fallback search
     const advancedResult = await advancedElementSearch(target, 'fill', value, 2);
     if (advancedResult) {
         return true;
     }
 
-    // PRIORITY 4: If there's a priority subwindow open, search it
+    // Search subwindows with equal priority
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
-        log(`\n🎯 [PRIORITY 4 - SUBWINDOW SEARCH] Latest subwindow is open - searching for field: "${target}"`);
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'fill', value);
             if (foundInPriorityWindow) {
-                log(`✅ [PRIORITY 4] Successfully filled in subwindow!`);
+                log(`✅ Successfully filled in subwindow!`);
                 return true;
             }
         } catch (e) {
@@ -4902,8 +4967,8 @@ async function executeStep(stepData: any): Promise<StepResult> {
             await logFrameStructure();
         }
         
-        // Detect and log modals in current page
-        await detectAndLogModals();
+        // Log current window and iframe info (simplified - no modal details)
+        await logWindowAndFrameInfo();
 
         if (action === 'OPEN' || action === 'OPENURL') {
             for (let i = 1; i <= 3; i++) {
