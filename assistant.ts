@@ -814,6 +814,153 @@ async function logPageStructureDiagnostics(targetSearch: string): Promise<void> 
     }
 }
 
+/**
+ * Special handler for LaunchWin iframes (Oracle Forms Customer Maintenance windows)
+ * These iframes have IDs like "ifr_LaunchWin60450732" and contain important forms
+ */
+async function searchInLaunchWinFrames(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        // Find all LaunchWin iframes on the page
+        const launchWinFrames = await state.page.locator('iframe[id^="ifr_LaunchWin"]').all();
+        
+        if (launchWinFrames.length > 0) {
+            log(`\n🪟 [LAUNCHWIN SEARCH] Found ${launchWinFrames.length} LaunchWin iframe(s) - searching for "${target}"`);
+        } else {
+            return false;
+        }
+
+        // Search each LaunchWin iframe
+        for (let idx = 0; idx < launchWinFrames.length; idx++) {
+            try {
+                const iframeElement = launchWinFrames[idx];
+                
+                // Get iframe ID for logging
+                const iframeId = await iframeElement.getAttribute('id').catch(() => `LaunchWin[${idx}]`);
+                const iframeName = await iframeElement.getAttribute('name').catch(() => 'unnamed');
+                
+                log(`   ├─ Searching in iframe: [${iframeId}] name="${iframeName}"`);
+                
+                // Wait for iframe to be visible and loaded
+                await iframeElement.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                await state.page.waitForTimeout(300);
+                
+                // Access frame content
+                const frameSelector = `#${iframeId}`;
+                const iframeLocator = state.page.frameLocator(frameSelector).first();
+                
+                // Wait for body to be ready
+                await iframeLocator.locator('body').waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                
+                // For CLICK action
+                if (action === 'click') {
+                    // Get all clickable elements in the iframe
+                    const clickables = await iframeLocator.locator('button, [role="button"], input[type="button"], input[type="submit"], a, [onclick], div[onclick]').all();
+                    
+                    log(`      🔍 Found ${clickables.length} clickable elements`);
+                    
+                    for (const elem of clickables) {
+                        try {
+                            const text = await elem.textContent().catch(() => '');
+                            const value = await elem.getAttribute('value').catch(() => '');
+                            const title = await elem.getAttribute('title').catch(() => '');
+                            const ariaLabel = await elem.getAttribute('aria-label').catch(() => '');
+                            
+                            const allText = `${text} ${value} ${title} ${ariaLabel}`.toLowerCase();
+                            
+                            if (allText.includes(target.toLowerCase())) {
+                                log(`      ✓ FOUND: "${text}" - Clicking...`);
+                                
+                                // Try clicking
+                                try {
+                                    await elem.click({ force: true, timeout: 3000 }).catch(() => {});
+                                    log(`      ✅ [LAUNCHWIN-CLICK] Successfully clicked "${target}" in ${iframeId}`);
+                                    await state.page.waitForTimeout(500);
+                                    return true;
+                                } catch (clickErr: any) {
+                                    log(`      ⚠️  Click failed, trying JavaScript...`);
+                                    // Try JavaScript click via element evaluation
+                                    try {
+                                        await elem.evaluate((el: any) => {
+                                            el.click();
+                                        });
+                                        log(`      ✅ [LAUNCHWIN-CLICK-JS] Clicked "${target}" in ${iframeId}`);
+                                        await state.page.waitForTimeout(500);
+                                        return true;
+                                    } catch (jsClickErr: any) {
+                                        log(`      ⚠️  JavaScript click also failed`);
+                                    }
+                                }
+                            }
+                        } catch (elemErr: any) {
+                            // Continue to next element
+                        }
+                    }
+                }
+                
+                // For FILL action
+                if (action === 'fill' && fillValue) {
+                    // Get all input fields in the iframe
+                    const inputs = await iframeLocator.locator('input[type="text"], textarea, input:not([type])').all();
+                    
+                    log(`      🔍 Found ${inputs.length} input fields`);
+                    
+                    for (const input of inputs) {
+                        try {
+                            const placeholder = await input.getAttribute('placeholder').catch(() => '');
+                            const title = await input.getAttribute('title').catch(() => '');
+                            const name = await input.getAttribute('name').catch(() => '');
+                            const id = await input.getAttribute('id').catch(() => '');
+                            const ariaLabel = await input.getAttribute('aria-label').catch(() => '');
+                            
+                            const allText = `${placeholder} ${title} ${name} ${id} ${ariaLabel}`.toLowerCase();
+                            
+                            if (allText.includes(target.toLowerCase())) {
+                                log(`      ✓ FOUND: "${title || placeholder || name}" - Filling with "${fillValue}"`);
+                                
+                                try {
+                                    await input.fill(fillValue, { timeout: 2000 });
+                                    log(`      ✅ [LAUNCHWIN-FILL] Successfully filled "${target}" in ${iframeId}`);
+                                    await state.page.waitForTimeout(300);
+                                    return true;
+                                } catch (fillErr: any) {
+                                    log(`      ⚠️  Fill failed, trying JavaScript...`);
+                                    // Try JavaScript fill via element evaluation
+                                    try {
+                                        await input.evaluate((el: any, val: string) => {
+                                            (el as HTMLInputElement).value = val;
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('blur', { bubbles: true }));
+                                        }, fillValue);
+                                        log(`      ✅ [LAUNCHWIN-FILL-JS] Filled "${target}" in ${iframeId}`);
+                                        await state.page.waitForTimeout(300);
+                                        return true;
+                                    } catch (jsEvalErr: any) {
+                                        log(`      ⚠️  JavaScript fill also failed`);
+                                    }
+                                }
+                            }
+                        } catch (elemErr: any) {
+                            // Continue to next input
+                        }
+                    }
+                }
+                
+            } catch (iframeErr: any) {
+                log(`      ⚠️  Error searching in iframe: ${iframeErr.message}`);
+                continue;
+            }
+        }
+        
+        return false;
+    } catch (error: any) {
+        log(`🪟 [LAUNCHWIN ERROR] ${error.message}`);
+        return false;
+    }
+}
+
 async function searchInAllFrames(target: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
     if (!state.page || state.page.isClosed()) return false;
 
@@ -837,6 +984,14 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
         
         // DIAGNOSTIC: Log frame details on first search of page
         await logPageStructureDiagnostics(target);
+
+        // **SPECIAL HANDLER**: Search LaunchWin iframes FIRST (Customer Maintenance windows)
+        // These are special Oracle Forms windows that contain important dialogs
+        const launchWinResult = await searchInLaunchWinFrames(target, action, fillValue);
+        if (launchWinResult) {
+            log(`✅ [LAUNCHWIN-IFRAME] Found and executed action in Customer Maintenance window!`);
+            return true;
+        }
 
         // Step 2: Build frame hierarchy (main page + nested iframes in sequence)
         const frameSequence = buildFrameSearchSequence(framesToSearch);
