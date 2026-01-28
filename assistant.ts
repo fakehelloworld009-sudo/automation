@@ -860,156 +860,51 @@ async function searchInLaunchWinFrames(target: string, action: 'click' | 'fill',
                     
                     log(`      🔍 Found ${clickables.length} clickable elements`);
                     
-                    // Separate into exact and partial matches
-                    const exactMatches: any[] = [];
-                    const partialMatches: any[] = [];
-                    
                     for (const elem of clickables) {
                         try {
-                            // **CRITICAL**: Check if element is actually visible on screen FIRST
-                            const isVisible = await elem.isVisible().catch(() => false);
-                            if (!isVisible) {
-                                continue; // Skip invisible elements
-                            }
-                            
-                            // Check if element is in viewport (not off-screen)
-                            const boundingBox = await elem.boundingBox().catch(() => null);
-                            if (!boundingBox) {
-                                continue; // Skip elements without bounding box
-                            }
-                            
-                            // Get VISIBLE text only (innerText), not hidden text
-                            const visibleText = await elem.evaluate((el: any) => {
-                                return el.innerText || el.textContent || '';
-                            }).catch(() => '');
-                            
+                            const text = await elem.textContent().catch(() => '');
                             const value = await elem.getAttribute('value').catch(() => '');
                             const title = await elem.getAttribute('title').catch(() => '');
-                            const ariaLabel = await elem.getAttribute('aria-label').catch(() => '');
                             
-                            const visibleTextTrimmed = visibleText.trim().toLowerCase();
-                            const valueTrimmed = value.trim().toLowerCase();
-                            const titleTrimmed = title.trim().toLowerCase();
-                            const ariaLabelTrimmed = ariaLabel.trim().toLowerCase();
+                            const fullText = `${text} ${value} ${title}`;
                             
-                            const targetLower = target.toLowerCase();
-                            
-                            // EXACT MATCH: Direct match on any attribute (HIGHEST PRIORITY)
-                            if (visibleTextTrimmed === targetLower || valueTrimmed === targetLower || 
-                                titleTrimmed === targetLower || ariaLabelTrimmed === targetLower) {
-                                exactMatches.push({
-                                    elem,
-                                    text: visibleText,
-                                    boundingBox,
-                                    matchType: 'exact'
-                                });
-                                continue;
-                            }
-                            
-                            // WORD MATCH: Target is a complete word (not substring)
-                            const words = visibleTextTrimmed.split(/\s+/);
-                            if (words.includes(targetLower)) {
-                                partialMatches.push({
-                                    elem,
-                                    text: visibleText,
-                                    boundingBox,
-                                    matchType: 'word'
-                                });
-                                continue;
-                            }
-                            
-                            // FALLBACK: Substring match (only if nothing else works)
-                            const allText = `${visibleTextTrimmed} ${valueTrimmed} ${titleTrimmed} ${ariaLabelTrimmed}`;
-                            if (allText.includes(targetLower)) {
-                                partialMatches.push({
-                                    elem,
-                                    text: visibleText,
-                                    boundingBox,
-                                    matchType: 'substring'
-                                });
+                            if (fullText.toLowerCase().includes(target.toLowerCase())) {
+                                const boundingBox = await elem.boundingBox().catch(() => null);
+                                if (boundingBox) {
+                                    log(`      ✓ FOUND VISIBLE: "${text.trim() || value.trim()}" at position [${boundingBox.x.toFixed(0)}, ${boundingBox.y.toFixed(0)}] - Attempting click...`);
+                                    
+                                    try {
+                                        await elem.click({ force: true, timeout: 3000 });
+                                        log(`      ✅ [LAUNCHWIN-CLICK] Successfully clicked "${target}" in ${iframeId}`);
+                                        await state.page.waitForTimeout(500);
+                                        return true;
+                                    } catch (clickErr: any) {
+                                        log(`      ⚠️  Playwright click failed (${clickErr.message}), trying JavaScript...`);
+                                        try {
+                                            const jsClickResult = await elem.evaluate((el: any) => {
+                                                try {
+                                                    (el as HTMLElement).click();
+                                                    return { success: true };
+                                                } catch (e: any) {
+                                                    return { success: false, error: e.message };
+                                                }
+                                            });
+                                            
+                                            if (jsClickResult && jsClickResult.success) {
+                                                log(`      ✅ [LAUNCHWIN-CLICK-JS] JavaScript click succeeded for "${target}" in ${iframeId}`);
+                                                await state.page.waitForTimeout(500);
+                                                return true;
+                                            } else {
+                                                log(`      ⚠️  JavaScript click failed: ${jsClickResult?.error || 'unknown error'}`);
+                                            }
+                                        } catch (jsClickErr: any) {
+                                            log(`      ⚠️  JavaScript evaluation failed: ${jsClickErr.message}`);
+                                        }
+                                    }
+                                }
                             }
                         } catch (elemErr: any) {
                             // Continue to next element
-                        }
-                    }
-                    
-                    // Try EXACT matches FIRST
-                    if (exactMatches.length > 0) {
-                        const match = exactMatches[0];
-                        log(`      ✓ FOUND EXACT MATCH: "${match.text.trim()}" at position [${match.boundingBox.x.toFixed(0)}, ${match.boundingBox.y.toFixed(0)}] - Attempting click...`);
-                        
-                        // Try clicking with verification
-                        let clickSuccess = false;
-                        try {
-                            await match.elem.click({ force: true, timeout: 3000 });
-                            clickSuccess = true;
-                            log(`      ✅ [LAUNCHWIN-CLICK] Successfully clicked EXACT MATCH "${target}" in ${iframeId}`);
-                            await state.page.waitForTimeout(500);
-                            return true;
-                        } catch (clickErr: any) {
-                            log(`      ⚠️  Playwright click failed (${clickErr.message}), trying JavaScript...`);
-                        }
-                        
-                        // If Playwright click failed, try JavaScript
-                        if (!clickSuccess) {
-                            try {
-                                const jsClickResult = await match.elem.evaluate((el: any) => {
-                                    try {
-                                        (el as HTMLElement).click();
-                                        return { success: true };
-                                    } catch (e: any) {
-                                        return { success: false, error: e.message };
-                                    }
-                                });
-                                
-                                if (jsClickResult && jsClickResult.success) {
-                                    log(`      ✅ [LAUNCHWIN-CLICK-JS] JavaScript click succeeded for EXACT MATCH "${target}" in ${iframeId}`);
-                                    await state.page.waitForTimeout(500);
-                                    return true;
-                                } else {
-                                    log(`      ⚠️  JavaScript click failed: ${jsClickResult?.error || 'unknown error'}`);
-                                }
-                            } catch (jsClickErr: any) {
-                                log(`      ⚠️  JavaScript evaluation failed: ${jsClickErr.message}`);
-                            }
-                        }
-                    }
-                    
-                    // Try PARTIAL matches if no exact match worked
-                    if (partialMatches.length > 0) {
-                        const match = partialMatches[0];
-                        log(`      ✓ FOUND ${match.matchType.toUpperCase()} MATCH: "${match.text.trim()}" at position [${match.boundingBox.x.toFixed(0)}, ${match.boundingBox.y.toFixed(0)}] - Attempting click...`);
-                        
-                        let clickSuccess = false;
-                        try {
-                            await match.elem.click({ force: true, timeout: 3000 });
-                            clickSuccess = true;
-                            log(`      ✅ [LAUNCHWIN-CLICK] Successfully clicked ${match.matchType.toUpperCase()} MATCH "${target}" in ${iframeId}`);
-                            await state.page.waitForTimeout(500);
-                            return true;
-                        } catch (clickErr: any) {
-                            log(`      ⚠️  Playwright click failed, trying JavaScript...`);
-                        }
-                        
-                        if (!clickSuccess) {
-                            try {
-                                const jsClickResult = await match.elem.evaluate((el: any) => {
-                                    try {
-                                        (el as HTMLElement).click();
-                                        return { success: true };
-                                    } catch (e: any) {
-                                        return { success: false, error: e.message };
-                                    }
-                                });
-                                
-                                if (jsClickResult && jsClickResult.success) {
-                                    log(`      ✅ [LAUNCHWIN-CLICK-JS] JavaScript click succeeded for ${match.matchType.toUpperCase()} MATCH "${target}" in ${iframeId}`);
-                                    await state.page.waitForTimeout(500);
-                                    return true;
-                                }
-                            } catch (jsClickErr: any) {
-                                log(`      ⚠️  JavaScript evaluation failed: ${jsClickErr.message}`);
-                            }
                         }
                     }
                 }
