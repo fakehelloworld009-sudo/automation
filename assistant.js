@@ -2297,33 +2297,74 @@ async function searchInPageOverlays(target, action, fillValue) {
             // For FILL action: Look for input fields
             if (isAction === 'fill') {
                 const allInputs = document.querySelectorAll('input[type="text"], textarea, input:not([type])');
+                // Separate candidates into exact matches and partial matches
+                const exactMatches = [];
+                const partialMatches = [];
                 for (const input of Array.from(allInputs)) {
                     const el = input;
-                    // Get all possible identifiers
-                    const title = (el.getAttribute('title') || '').toLowerCase();
-                    const placeholder = (el.getAttribute('placeholder') || '').toLowerCase();
-                    const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                    const name = (el.getAttribute('name') || '').toLowerCase();
-                    const id = (el.getAttribute('id') || '').toLowerCase();
+                    // Get all possible identifiers and trim them
+                    const title = (el.getAttribute('title') || '').trim().toLowerCase();
+                    const placeholder = (el.getAttribute('placeholder') || '').trim().toLowerCase();
+                    const ariaLabel = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    const name = (el.getAttribute('name') || '').trim().toLowerCase();
+                    const id = (el.getAttribute('id') || '').trim().toLowerCase();
                     // Check nearby labels and parent text
                     let nearbyText = '';
                     if (el.parentElement) {
-                        nearbyText += (el.parentElement.textContent || '').toLowerCase();
+                        nearbyText += (el.parentElement.textContent || '').trim().toLowerCase();
                     }
                     if (el.parentElement?.parentElement) {
-                        nearbyText += ' ' + (el.parentElement.parentElement.textContent || '').toLowerCase();
+                        nearbyText += ' ' + (el.parentElement.parentElement.textContent || '').trim().toLowerCase();
                     }
+                    // Check visibility first
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width <= 0 || rect.height <= 0)
+                        continue; // Skip invisible
+                    // EXACT MATCH: Direct attribute match (highest priority)
+                    if (title === searchLower || placeholder === searchLower || ariaLabel === searchLower) {
+                        exactMatches.push(el);
+                        continue;
+                    }
+                    // WORD MATCH: Target is a complete word in the text
+                    const titleWords = title.split(/\s+/);
+                    const placeholderWords = placeholder.split(/\s+/);
+                    const ariaWords = ariaLabel.split(/\s+/);
+                    if (titleWords.includes(searchLower) || placeholderWords.includes(searchLower) || ariaWords.includes(searchLower)) {
+                        partialMatches.push(el);
+                        continue;
+                    }
+                    // FALLBACK: Substring match (last resort)
                     const allText = `${title} ${placeholder} ${ariaLabel} ${name} ${id} ${nearbyText}`;
-                    // Check if this field matches what we're looking for
                     if (allText.includes(searchLower)) {
-                        // Check if element is visible (it might be in a modal)
+                        partialMatches.push(el);
+                    }
+                }
+                // Try exact matches FIRST
+                if (exactMatches.length > 0) {
+                    const el = exactMatches[0];
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        // Element is visible - FILL it
+                        el.focus();
+                        el.select();
+                        el.value = fillVal;
+                        // Dispatch events to trigger any change handlers
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('blur', { bubbles: true }));
+                        el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+                        el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+                        return { found: true, action: 'fill', target: searchText };
+                    }
+                }
+                // Then try partial matches
+                if (partialMatches.length > 0) {
+                    for (const el of partialMatches) {
                         const rect = el.getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
-                            // Element is visible - FILL it
                             el.focus();
                             el.select();
                             el.value = fillVal;
-                            // Dispatch events to trigger any change handlers
                             el.dispatchEvent(new Event('input', { bubbles: true }));
                             el.dispatchEvent(new Event('change', { bubbles: true }));
                             el.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -2337,20 +2378,56 @@ async function searchInPageOverlays(target, action, fillValue) {
             // For CLICK action: Look for buttons and clickable elements
             if (isAction === 'click') {
                 const clickables = document.querySelectorAll('button, input[type="button"], input[type="submit"], a, [role="button"]');
+                // Separate candidates into exact matches and partial matches
+                const exactMatches = [];
+                const partialMatches = [];
                 for (const elem of Array.from(clickables)) {
                     const el = elem;
-                    const text = (el.textContent || '').toLowerCase();
-                    const value = (el.getAttribute('value') || '').toLowerCase();
-                    const title = (el.getAttribute('title') || '').toLowerCase();
-                    const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+                    const text = (el.textContent || '').trim().toLowerCase();
+                    const value = (el.getAttribute('value') || '').trim().toLowerCase();
+                    const title = (el.getAttribute('title') || '').trim().toLowerCase();
+                    const ariaLabel = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    // Check visibility first
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width <= 0 || rect.height <= 0)
+                        continue; // Skip invisible
+                    // EXACT MATCH: Full text equals target
+                    if (text === searchLower || value === searchLower || title === searchLower || ariaLabel === searchLower) {
+                        exactMatches.push(el);
+                        continue;
+                    }
+                    // WORD MATCH: Target is a complete word in the text (not substring)
+                    const words = text.split(/\s+/);
+                    if (words.includes(searchLower)) {
+                        partialMatches.push(el);
+                        continue;
+                    }
+                    // FALLBACK: Substring match (last resort)
                     const allText = `${text} ${value} ${title} ${ariaLabel}`;
                     if (allText.includes(searchLower)) {
-                        // Check if element is visible
-                        const rect = el.getBoundingClientRect();
-                        if (rect.width > 0 && rect.height > 0) {
-                            // Element is visible - CLICK it
+                        partialMatches.push(el);
+                    }
+                }
+                // Try exact matches FIRST (highest priority)
+                if (exactMatches.length > 0) {
+                    const el = exactMatches[0];
+                    try {
+                        el.click();
+                        return { found: true, action: 'click', target: searchText };
+                    }
+                    catch (e) {
+                        // Try next
+                    }
+                }
+                // Then try word matches
+                if (partialMatches.length > 0) {
+                    for (const el of partialMatches) {
+                        try {
                             el.click();
                             return { found: true, action: 'click', target: searchText };
+                        }
+                        catch (e) {
+                            // Try next element
                         }
                     }
                 }
