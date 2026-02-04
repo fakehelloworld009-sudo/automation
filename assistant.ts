@@ -4323,13 +4323,225 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
     return false;
 }
 
+/**
+ * Handle dropdown/select elements by opening them and clicking the correct option
+ */
+async function handleDropdown(target: string, value: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    log(`🔽 [DROPDOWN] Attempting to handle dropdown for: "${target}" = "${value}"`);
+
+    try {
+        // Strategy 1: Native <select> element
+        const selectHandled = await state.page.evaluate(({ searchTarget, selectValue }) => {
+            const selects = document.querySelectorAll('select');
+            for (const select of Array.from(selects)) {
+                const label = (select as any).name || (select as any).id || '';
+                const ariaLabel = select.getAttribute('aria-label') || '';
+                
+                // Check if this select matches our target
+                if (label.toLowerCase().includes(searchTarget.toLowerCase()) ||
+                    ariaLabel.toLowerCase().includes(searchTarget.toLowerCase())) {
+                    
+                    // Find and select the option
+                    const options = (select as any).querySelectorAll('option');
+                    for (const option of Array.from(options)) {
+                        if ((option as any).textContent.toLowerCase().includes(selectValue.toLowerCase())) {
+                            (select as any).value = (option as any).value;
+                            select.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }, { searchTarget: target, selectValue: value });
+
+        if (selectHandled) {
+            log(`✅ [DROPDOWN] Successfully selected option in native <select>`);
+            await state.page.waitForTimeout(300);
+            return true;
+        }
+    } catch (e) {
+        log(`⚠️  Native select handling failed`);
+    }
+
+    try {
+        // Strategy 2: Custom dropdown with role="listbox" or role="combobox"
+        const customDropdownHandled = await state.page.evaluate(({ searchTarget, optionValue }) => {
+            const dropdowns = document.querySelectorAll('[role="listbox"], [role="combobox"], .dropdown, [data-role="dropdown"]');
+            
+            for (const dropdown of Array.from(dropdowns)) {
+                // Check if this dropdown matches the target
+                const dropdownText = dropdown.textContent || '';
+                const dropdownLabel = dropdown.getAttribute('aria-label') || '';
+                
+                if (!dropdownText.toLowerCase().includes(searchTarget.toLowerCase()) &&
+                    !dropdownLabel.toLowerCase().includes(searchTarget.toLowerCase())) {
+                    continue;
+                }
+
+                // Click to open the dropdown
+                const trigger = dropdown.querySelector('button, [role="button"], a') || dropdown;
+                (trigger as any).click?.();
+
+                // Wait a moment for options to appear
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        // Find and click the matching option
+                        const options = dropdown.querySelectorAll('[role="option"], li, div[data-value]');
+                        for (const option of Array.from(options)) {
+                            const optText = option.textContent?.trim().toLowerCase() || '';
+                            if (optText.includes(optionValue.toLowerCase())) {
+                                (option as any).click?.();
+                                resolve(true);
+                                return;
+                            }
+                        }
+                        resolve(false);
+                    }, 400);
+                });
+            }
+            return false;
+        }, { searchTarget: target, optionValue: value });
+
+        if (customDropdownHandled) {
+            log(`✅ [DROPDOWN] Successfully selected option in custom dropdown`);
+            await state.page.waitForTimeout(300);
+            return true;
+        }
+    } catch (e) {
+        log(`⚠️  Custom dropdown handling failed`);
+    }
+
+    try {
+        // Strategy 3: Search for dropdown by looking for adjacent label + select structure
+        const adjacentHandled = await state.page.evaluate(({ labelText, optionValue }) => {
+            // Find label element containing target text
+            const labels = document.querySelectorAll('label, div, span');
+            for (const label of Array.from(labels)) {
+                if (!label.textContent?.toLowerCase().includes(labelText.toLowerCase())) continue;
+
+                // Look for nearby select or dropdown trigger
+                let parent = label.parentElement;
+                let found = false;
+
+                for (let i = 0; i < 4; i++) {
+                    if (!parent) break;
+
+                    // Check for native select
+                    const select = parent.querySelector('select');
+                    if (select) {
+                        const options = select.querySelectorAll('option');
+                        for (const option of Array.from(options)) {
+                            if ((option as any).textContent.toLowerCase().includes(optionValue.toLowerCase())) {
+                                (select as any).value = (option as any).value;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Check for custom dropdown
+                    const dropdown = parent.querySelector('[role="listbox"], [role="combobox"]');
+                    if (dropdown) {
+                        const trigger = dropdown.querySelector('button') || dropdown;
+                        (trigger as any).click?.();
+
+                        setTimeout(() => {
+                            const options = dropdown.querySelectorAll('[role="option"]');
+                            for (const option of Array.from(options)) {
+                                if ((option as any).textContent.toLowerCase().includes(optionValue.toLowerCase())) {
+                                    (option as any).click?.();
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }, 300);
+                    }
+
+                    if (found) break;
+                    parent = parent.parentElement;
+                }
+
+                if (found) return true;
+            }
+            return false;
+        }, { labelText: target, optionValue: value });
+
+        if (adjacentHandled) {
+            log(`✅ [DROPDOWN] Successfully selected option via label-adjacent search`);
+            await state.page.waitForTimeout(300);
+            return true;
+        }
+    } catch (e) {
+        log(`⚠️  Label-adjacent dropdown handling failed`);
+    }
+
+    return false;
+}
+
+/**
+ * Detect if target is a dropdown/select element and handle accordingly
+ */
+async function detectAndHandleDropdown(target: string, value: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        const isDropdown = await state.page.evaluate((searchTarget) => {
+            // Look for any element that might be a dropdown
+            const allElements = document.querySelectorAll('*');
+            
+            for (const el of Array.from(allElements)) {
+                const text = el.textContent?.toLowerCase() || '';
+                const label = el.getAttribute('aria-label')?.toLowerCase() || '';
+                const name = el.getAttribute('name')?.toLowerCase() || '';
+                
+                if (!text.includes(searchTarget.toLowerCase()) &&
+                    !label.includes(searchTarget.toLowerCase()) &&
+                    !name.includes(searchTarget.toLowerCase())) {
+                    continue;
+                }
+
+                // Check if element is or contains a dropdown
+                if (el.tagName === 'SELECT') return true;
+                if (el.getAttribute('role') === 'listbox') return true;
+                if (el.getAttribute('role') === 'combobox') return true;
+                if (el.classList.toString().includes('dropdown')) return true;
+                if (el.classList.toString().includes('select')) return true;
+                if (el.getAttribute('data-role') === 'dropdown') return true;
+            }
+
+            return false;
+        }, target);
+
+        if (isDropdown) {
+            log(`🔍 [DROPDOWN-DETECT] Found dropdown element, attempting to handle...`);
+            return await handleDropdown(target, value);
+        }
+    } catch (e) {
+        // Not a dropdown or detection failed
+    }
+
+    return false;
+}
+
 async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
 
+    // CRITICAL: Check for dropdown/select elements FIRST before trying to fill as text input
+    log(`\n🔽 [FILL-REQUEST] Checking if target is a dropdown/select element...`);
+    const dropdownHandled = await detectAndHandleDropdown(target, value);
+    if (dropdownHandled) {
+        log(`✅ [FILL-SUCCESS] Dropdown handling succeeded for: "${target}" = "${value}"`);
+        return true;
+    }
+
     // Search all windows/frames/iframes with EQUAL PRIORITY
     // No special priority for overlays - search everything uniformly
-    log(`\n🔍 Searching for: "${target}"`);
+    log(`\n🔍 Searching for regular field: "${target}"`);
     
     const mainPageResult = await searchInAllFrames(target, 'fill', value);
     if (mainPageResult) {
