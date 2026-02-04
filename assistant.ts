@@ -3807,6 +3807,105 @@ async function advancedElementSearch(target: string, action: 'click' | 'fill', f
     return false;
 }
 
+/**
+ * Try clicking using direct DOM manipulation with improved visibility checks
+ */
+async function tryDirectDOMClick(page: Page, target: string): Promise<boolean> {
+    try {
+        const result = await page.evaluate((searchTarget) => {
+            const targetLower = searchTarget.toLowerCase().trim();
+            
+            // Find ALL elements that contain the target text
+            const allElements = document.querySelectorAll('*');
+            const matchingElements: HTMLElement[] = [];
+            
+            for (const el of Array.from(allElements)) {
+                // Check direct text content (not including nested elements' text)
+                const directText = Array.from(el.childNodes)
+                    .filter(node => node.nodeType === 3)  // Text nodes only
+                    .map(node => (node.textContent || '').trim())
+                    .join(' ')
+                    .toLowerCase();
+                    
+                // Check if any part of the full text contains target
+                const fullText = (el.textContent || '').trim().toLowerCase();
+                
+                if (directText.includes(targetLower) || (fullText === targetLower && el.children.length < 5)) {
+                    matchingElements.push(el as HTMLElement);
+                }
+            }
+            
+            if (matchingElements.length === 0) {
+                return { found: false, reason: 'No matching elements found' };
+            }
+            
+            // Try each matching element, prioritize visible and clickable ones
+            for (const el of matchingElements) {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                
+                // Check if element or its parent is clickable
+                let clickableParent = el;
+                const isClickable = el.tagName === 'BUTTON' || 
+                                   el.tagName === 'A' ||
+                                   el.getAttribute('role') === 'button' ||
+                                   el.getAttribute('role') === 'menuitem' ||
+                                   el.getAttribute('onclick') !== null;
+                
+                // Walk up to find a clickable parent
+                if (!isClickable) {
+                    let parent = el.parentElement;
+                    let depth = 0;
+                    while (parent && depth < 5) {
+                        const parentClickable = parent.tagName === 'BUTTON' ||
+                                               parent.tagName === 'A' ||
+                                               parent.getAttribute('role') === 'button' ||
+                                               parent.getAttribute('role') === 'menuitem' ||
+                                               parent.getAttribute('onclick') !== null;
+                        if (parentClickable) {
+                            clickableParent = parent;
+                            break;
+                        }
+                        parent = parent.parentElement;
+                        depth++;
+                    }
+                }
+                
+                // Check if clickable element is visible
+                const clickableStyle = window.getComputedStyle(clickableParent);
+                const clickableRect = clickableParent.getBoundingClientRect();
+                
+                const isVisible = clickableStyle.display !== 'none' &&
+                                 clickableStyle.visibility !== 'hidden' &&
+                                 (clickableStyle.opacity === undefined || parseFloat(clickableStyle.opacity) > 0) &&
+                                 clickableRect.width > 0 &&
+                                 clickableRect.height > 0;
+                
+                if (isVisible) {
+                    // Scroll into view and click
+                    clickableParent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    (clickableParent as any).click?.();
+                    return { found: true, clicked: true, element: clickableParent.tagName, text: clickableParent.textContent?.substring(0, 50) };
+                }
+            }
+            
+            // If no visible element found, return details
+            return { found: true, clicked: false, reason: 'Found matching text but no visible clickable element', count: matchingElements.length };
+        }, target);
+        
+        if (result && result.found && result.clicked) {
+            log(`✅ [DIRECT-DOM] Successfully clicked: ${result.element}`);
+            await page.waitForTimeout(300);
+            return true;
+        } else if (result && result.found) {
+            log(`⚠️  [DIRECT-DOM] Found but couldn't click: ${result.reason}`);
+        }
+    } catch (e) {
+        log(`[DIRECT-DOM] Error: ${e}`);
+    }
+    return false;
+}
+
 async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
@@ -3814,6 +3913,14 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
     // Search all windows/frames/iframes with EQUAL PRIORITY
     // No special priority for overlays - search everything uniformly
     log(`\n🔍 Searching for: "${target}"`);
+    
+    // NEW: Try direct DOM click with improved visibility detection
+    if (state.page && !state.page.isClosed()) {
+        const directSuccess = await tryDirectDOMClick(state.page, target);
+        if (directSuccess) {
+            return true;
+        }
+    }
     
     const mainPageResult = await searchInAllFrames(target, 'click');
     if (mainPageResult) {
@@ -3855,155 +3962,6 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 if (!state.page || state.page.isClosed()) {
                     return false;
                 }
-            }
-
-            // **CRITICAL: Handle hidden menu items in dropdown menus**
-            try {
-                const nestedMenuFound = await state.page?.evaluate(({ search: targetText }) => {
-                    const searchLower = targetText.toLowerCase().trim();
-                    const allElements = document.querySelectorAll('*');
-                    
-                    // Find elements that match the target text
-                    let candidates: any[] = [];
-                    for (const el of Array.from(allElements)) {
-                        // Get ONLY the direct text content of this element
-                        const directText = Array.from(el.childNodes)
-                            .filter(n => n.nodeType === 3) // Text nodes only
-                            .map(n => (n.textContent || '').trim())
-                            .join(' ')
-                            .toLowerCase();
-                        
-                        // Also check element's own text if no children
-                        const elementText = el.children.length === 0 
-                            ? (el.textContent || '').trim().toLowerCase() 
-                            : directText;
-                        
-                        // Match exact or very close text
-                        if (elementText === searchLower || 
-                            (directText && directText === searchLower) ||
-                            (elementText.length > 0 && searchLower.includes(elementText.substring(0, Math.min(10, elementText.length))))) {
-                            candidates.push(el);
-                        }
-                    }
-                    
-                    if (candidates.length === 0) return false;
-                    
-                    // Check each candidate to see if it's hidden inside a menu
-                    for (const targetElement of candidates) {
-                        const style = window.getComputedStyle(targetElement);
-                        const isHidden = style.display === 'none' || 
-                                        style.visibility === 'hidden' || 
-                                        style.opacity === '0' ||
-                                        (style.width === '0px' && style.height === '0px');
-                        
-                        if (!isHidden) continue; // Skip visible elements
-                        
-                        // This element is hidden - check if parent is a menu
-                        let parent = targetElement.parentElement;
-                        let foundMenu = false;
-                        let menuTrigger: any = null;
-                        let depth = 0;
-                        
-                        while (parent && depth < 12) {
-                            const classList = parent.className || '';
-                            const role = parent.getAttribute('role') || '';
-                            const tag = parent.tagName.toLowerCase();
-                            
-                            // Check if this parent is a menu structure
-                            const isMenuStructure = 
-                                classList.includes('dropdown') ||
-                                classList.includes('menu') ||
-                                classList.includes('nav') ||
-                                role === 'menu' ||
-                                role === 'listbox' ||
-                                role === 'group' ||
-                                role === 'menuitem';
-                            
-                            if (isMenuStructure) {
-                                foundMenu = true;
-                                
-                                // Now find the trigger for this menu
-                                // Look for adjacent button/link BEFORE this menu
-                                let prev = parent.previousElementSibling;
-                                let checkCount = 0;
-                                while (prev && checkCount < 3) {
-                                    if (prev.tagName === 'BUTTON' || 
-                                        prev.tagName === 'A' ||
-                                        prev.getAttribute('role') === 'button') {
-                                        menuTrigger = prev;
-                                        break;
-                                    }
-                                    prev = prev.previousElementSibling;
-                                    checkCount++;
-                                }
-                                
-                                // If not found as sibling, check parent's first button child before the menu
-                                if (!menuTrigger && parent.parentElement) {
-                                    const parentElement = parent.parentElement;
-                                    const children = Array.from(parentElement.children);
-                                    const menuIndex = children.indexOf(parent);
-                                    
-                                    for (let i = menuIndex - 1; i >= 0; i--) {
-                                        const child = children[i];
-                                        if (child.tagName === 'BUTTON' || 
-                                            child.getAttribute('role') === 'button' ||
-                                            child.tagName === 'A') {
-                                            menuTrigger = child;
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                break;
-                            }
-                            
-                            parent = parent.parentElement;
-                            depth++;
-                        }
-                        
-                        // If we found a hidden element in a menu, click the trigger
-                        if (foundMenu && menuTrigger) {
-                            (menuTrigger as any).click?.();
-                            return true;
-                        }
-                    }
-                    
-                    return false;
-                }, { search: target });
-
-                if (nestedMenuFound) {
-                    log(`✅ [NESTED-MENU] Detected hidden menu item, opening parent menu...`);
-                    await state.page?.waitForTimeout(1000); // Wait for menu to open
-                    
-                    // Now try clicking the target again - it should be visible now
-                    const directClickResult = await state.page?.evaluate(({ search: targetText }) => {
-                        const searchLower = targetText.toLowerCase().trim();
-                        const allElements = document.querySelectorAll('*');
-                        
-                        // Find visible element matching target
-                        for (const el of Array.from(allElements)) {
-                            const text = (el.textContent || '').trim().toLowerCase();
-                            const style = window.getComputedStyle(el);
-                            
-                            // Check if visible and matches
-                            if (text === searchLower && 
-                                style.display !== 'none' && 
-                                style.visibility !== 'hidden') {
-                                (el as any).click?.();
-                                return true;
-                            }
-                        }
-                        return false;
-                    }, { search: target });
-                    
-                    if (directClickResult) {
-                        log(`✅ [NESTED-MENU] Successfully clicked menu item after opening parent`);
-                        await state.page?.waitForTimeout(500);
-                        return true;
-                    }
-                }
-            } catch (e) {
-                log(`⚠️  Nested menu handling error: ${e}`);
             }
 
             // Strategy 0: Handle visible modals/overlays - DIRECTLY CLICK visible elements
