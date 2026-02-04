@@ -1,1507 +1,575 @@
-<!DOCTYPE html><html lang="en" style="overflow:auto"><!-- Zooming Changes--><head>
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-	 <script type="text/javascript"> //citi ui change start
-     var gItemDesc       = new Array();
-      var commonErrors    = new Array();
-     </script><!--citi ui change end -->
-        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-        <meta http-equiv="Content-Language" content="en">
-        <meta http-equiv="cache-control" content="no-cache">
-        <meta http-equiv="Pragma" content="no-cache">
-        <meta http-equiv="Expires" content="0">
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><!--HTML5 Changes-->
-        <link rel="SHORTCUT ICON" href="data:;base64,="><!--citi ui change -->
-        <link href="Theme/ExtFlexblue.css" rel="stylesheet" type="text/css">
-        <link href="Theme/ExtFlexNewUI.css" rel="stylesheet" type="text/css"><!--HTML5 Changes-->
-        <link href="Theme/Exten.css" rel="stylesheet" type="text/css">
-        <link href="Theme/ExtBROWSER_GO.css" rel="stylesheet" type="text/css">
-        <link href="Theme/dash.css" rel="stylesheet" type="text/css">
-        <!--HTML5 Changes Start-->
-    <!--HTML5 Changes End -->
-    
-	 <!-- citi ui change -->  <script type="text/javascript" src="Script/JS/commonError_ENG_ENTITY_ID1.js"></script> <noscript>Script\x20Label</noscript>
-       <!-- citi ui change -->  <script type="text/javascript" src="Script/JS/ItemDesc_ENG_ENTITY_ID1.js"></script> <noscript>Script\x20Label</noscript> 
-        <script type="text/javascript" src="Script/JS/CcyDenomUtil.js"></script> <noscript>Script\x20Label</noscript>
-        <script type="text/javascript">
-        var gLoginTime = "null";
-        if(gLoginTime == "null"){
-          gLoginTime =  new Date().getTime();
-        }
-            var timeZone = "Africa\x2FMaseru"; //timeZone changes by Shishir
-            var mainWin          = window;
-            var entity           = "ENTITY_ID1";
-            var showChgBrnLOV    = false;
-            var autoLovReqd      = "Y";
-            var changeTheme      ="null";
-            var changeBranch     = "null";
-            var changeDept       = "null";
-            var changeEnt       = "null"; //SMSStandalone 12.3 Changes
-            var branchIdentifier =   "Y"; //SMSStandalone 12.3 DC Changes
-            var gXmlMenu         = "";//citi ui change
-            var bpelMenuXml      = "";
-            var bpelDashBoardMenuXml      = ""; //12.0.2 SOATEAM Changes
-            var isBpelEnabled    = false;
-            var mBeanArray       = new Array();     
-            
-            var mBean_Array      = new Array(); 
-            var loadTimeArray    = new Array(); 
-            var alertAction      = "LOGIN";
-            var branchPlugin     = 'N';
-            var bpelEnabled      = 'N';
-            var isBpelEnabled    = false;
-            var theme_imagesPath = 'Images\x2FExtFlexblue';
-            var changeToHome     = "Change\x20to\x20Home";
-            var bipBrnAdvType =   "null";
-			var ssoReq = "N"; /* SSO screen change */
-            /*Security bug SEC-12-Patch-081 fixes starts */
-            var sessionInterval =  "1800";
-             /*Security bug SEC-12-Patch-081 fixes ends */
-             /*12.0.2 Screen Saver Changes Start*/
-            var brnHostLinkStatus =   "ONLINE";
-            var AlertMsg =   "Information\x20Message";
-            var labelScreenSaverErrMsg =   "Please\x20Enter\x20Correct\x20Password";
-            var labelScreenSaverMsg =   "Enter\x20password\x20to\x20unlock\x20the\x20application";
-            var scrSaverReq         ='Y';
-            var scrSaverModifiableFlag  = 'Y';
-            var scrTimeout             =  '300';
-            //var userLevelDbgEnabled = 'N';//debug revert
-			var errLabel =  'Error\x20Message';//9NT1606_12_2_RETRO_12_0_3_21182929 changes
-             var lblErrDesc =  'Error\x20Description'; //9NT1606_12_2_RETRO_12_0_3_21182929 changes
-            var lblErrCode =  'Error\x20Code';//9NT1606_12_2_RETRO_12_0_3_21182929 changes
-            var  debugWindowEnabled = 'Y';//9NT1606_12_2_RETRO_12_0_3_21182929 changes 
-            var  rofcInstalled='Y';//SMSStandalone 12.3 Changes
-            var labelExpandMenu =  'Expand\x20Menu';//HTML5 changes 24/OCT/2016 Fix for 24942196
-            var  labelCollapseMenu = 'Collapse\x20Menu'; //HTML5 changes 24/OCT/2016 Fix for 24942196
-            /*12.0.2 Screen Saver Changes Start*/
-            var chatBotInstalled = 'N';
-			var counter = 0;
-            var platoUrl = '';
-            homeBranchFlag       = true;
-            confirmatioReq      = true;
-            finalarr = new Array();
-            t = new txn_actions();
-            
-            /* SSO screen change */
-            if (ssoReq == "Y") {
-                window.statusbar = 0;
-                window.toolbar =0;
-                window.resizeTo(screen.availWidth,screen.availHeight);
-            }
-            /* SSO screen change */
-           /* function fnEnableDebugLog() {
-                var debuglogElement = mainWin.document.getElementById('debuglogChk');
-                if(debuglogElement) {
-                    if(debuglogElement.checked)
-                        userLevelDbgEnabled = 'Y';
-                    else
-                        userLevelDbgEnabled = 'N';
-                }
-            }debug revert*/
-            
-            
-             var dashBoardWidth ;
-            function setHeights() {
-                if (self.innerHeight) {// all except Explorer
-                    x = self.innerWidth;
-                    y = self.innerHeight;
-                } else if (document.documentElement && document.documentElement.clientHeight) { // Explorer 6 Strict Mode
-                    x = document.documentElement.clientWidth;
-                    y = document.documentElement.clientHeight;
-                } else if (document.body) {
-                // other Explorers
-                    x = document.body.clientWidth;
-                    y = document.body.clientHeight;
-                }
-                else {
-       x = document.body.parentElement.scrollWidth;
-       y = document.body.parentElement.scrollHeight;
+<!DOCTYPE html><html lang="en" data-critters-container=""><head>
+<script type="text/javascript" src="https://www.bajajfinserv.in/public/71f4a87f1def2987dd9f6613d64edb64992f551cff66" async=""></script><script>
+  // Configuration for the flag
+  let environmentAllData = {
+    "ENVIRONMENT_NAME": "WEB_PROD",
+    "PLATFORM_NAME": "WEB",
+    "CONNECTION_SOURCE": "WEB",
+    "LIB_TYPE": "web_prod",
+    "apiBaseUrl": "https://pushengineweb.bajajfinserv.in/",
+    "ENVIRONMENT": "PROD"
+};
+</script>
+
+  <title>Bajaj Finserv: Loans, Cards, Insurance, Investments, Payments and more</title>
+  <meta name="keywords" content="Personal Loan, Fixed Deposit, Credit Card, Insta EMI Card, Insurance">
+  <meta name="description" content="Bajaj Finserv is India’s most diversified non-banking finance company. Visit the website to learn about our products. Get instant approval on loans, shop on EMIs, make an investment, get insurance and pay your bills.">
+  <link rel="canonical" href="https://www.bajajfinserv.in/">
+  <meta name="robots" content="index, follow">
+  <meta charset="utf-8"><style data-styles="">slot-fb{display:contents}slot-fb[hidden]{display:none}bfl-accordian,bfl-accordian-panel,bfl-accordion-input,bfl-ammount-input,bfl-app-header,bfl-bank-account-input,bfl-branch-input,bfl-button-group,bfl-card,bfl-checkbox-input,bfl-chip,bfl-container-layout,bfl-cta-button,bfl-cta-link,bfl-date-range,bfl-date-range-wrapper,bfl-divider,bfl-dob-input,bfl-doc-upload-input,bfl-document-verification-input,bfl-drawer-layout,bfl-dropdown-input,bfl-duration-child-input,bfl-duration-input,bfl-email-input,bfl-form-wrapper,bfl-grid-layout,bfl-gstin-input,bfl-hstack-card,bfl-icon,bfl-image,bfl-info-icon,bfl-labeled-value-card,bfl-limit-progress-bar,bfl-loan-amount-header,bfl-loan-amount-input,bfl-loan-tenur-note,bfl-loanamount-card,bfl-loanamount-input,bfl-loansummary-card,bfl-need-help,bfl-note-card,bfl-nudge,bfl-otp-varification,bfl-page-details,bfl-pan-input,bfl-para-text,bfl-pincode-input,bfl-radio-child-input,bfl-radio-group,bfl-radio-group-test,bfl-radio-input,bfl-radio-test,bfl-radiochip-input,bfl-smart-search-input,bfl-span-text,bfl-stack-layout,bfl-tab,bfl-tab-group,bfl-table,bfl-table-row,bfl-text-input,bfl-tracker-input,bfl-tracker-vertical-input,bfl-vertical-tracker-group,bfl-year-input,card-addons,card-text,common-form-error,input-field-error,json-form-generator,number-input{visibility:hidden}.hydrated{visibility:inherit}</style>
+  <meta property="og:title" content="Bajaj Finserv: Loans, Cards, Insurance, Investments, Payments and more">
+  <meta property="og:description" content="Bajaj Finserv is India's most diversified non-banking finance company. Visit the website to learn about our products. Get instant approval on loans, shop on EMIs, make an investment, get insurance and pay your bills">
+  <meta property="og:site_name" content="https://www.bajajfinserv.in">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://www.bajajfinserv.in/">
+  <meta property="og:image" content="https://cms-assets.bajajfinserv.in/is/image/bajajfinance/OG-thumbnail?scl=1&amp;fmt=png-alpha">
+  <meta property="og:locale" content="en">
+  <!-- <script src="https://assets.kpoint.com/orca/media/embed/player-vx.js" defer></script> -->
+  <base href="/myaccount/">
+  <script>
+    if(environmentAllData && environmentAllData.ENVIRONMENT === 'PROD'){
+      window.console.log = () => {};
+      window.console.debug = () => {};
+      window.console.error = () => {};
+      window.console.warn = () => {};
+      window.console.info = () => {};
+      window.console.timeLog = () => {};
     }
-                //HTML5 Changes Start
-                document.getElementById("masthead").style.width =   x -2 +'px'; /* Zooming Changes */
-                document.getElementById("leftpanel").style.top = document.getElementById("masthead").offsetHeight -3 + "px";
-                document.getElementById("vtab").style.height = y-(document.getElementById("taskbar").offsetHeight +  document.getElementById("menuHeaderDiv").offsetHeight +document.getElementById("masthead").offsetHeight +2)+"px";
-                document.getElementById("vTabCN_EXPLORE").style.height = y-(document.getElementById("taskbar").offsetHeight +  document.getElementById("menuHeaderDiv").offsetHeight +document.getElementById("masthead").offsetHeight +12)+"px";
-                document.getElementById("vtab").style.width = 0.229 * x + "px";/* Zooming Changes */
-                //document.getElementById("leftpanel").style.height = y-(document.getElementById("taskbar").offsetHeight +  document.getElementById("masthead").offsetHeight +5)+"px";
-                //document.getElementById("leftpanel").style.width = 0.23 * x + "px";/* Zooming Changes */
-                //document.getElementById("dashboard").style.height = y-(document.getElementById("taskbar").offsetHeight + document.getElementById("masthead").offsetHeight +  document.getElementById("menuHeaderDiv").offsetHeight+ 5)+"px";
-                document.getElementById("dashboard").style.height = y-(document.getElementById("taskbar").offsetHeight + document.getElementById("masthead").offsetHeight + 5)+"px";
-                dashBoardWidth =x-( (0.23 * x )+5);
-                document.getElementById("dashboard").style.width = dashBoardWidth +"px";
-                //document.getElementById("dashboard").style.marginTop = -(document.getElementById("vtab").offsetHeight +1) + "px"; /*Zooming Changes */
-                //HTML5 Changes End
-                document.getElementById("IFlauncher").style.top = document.getElementById("masthead").offsetHeight + 2 + "px";
-                /*Fix For Bug 17356684 Start */
-                document.getElementById("menuDetail").style.top = document.getElementById("masthead").offsetHeight + 2 + "px"; /*Zooming Changes */
-                document.getElementById("menuDetail").style.width=  document.getElementById("masthead").offsetWidth -2  + "px";/*Zooming Changes */
-                document.getElementById("SYS_TBL_TABS").style.width = x -2 + "px";/* Zooming Changes */
-                document.getElementById("menuBarSpan").style.width =  document.getElementById("menuDetail").offsetWidth * 0.80 - 2 + "px"; /* Zooming Changes */
-                document.getElementById("taskbar").style.width = x-2 + "px"; /* Zooming Changes */
-                document.body.style.minWidth = x + "px"; /* Zooming Changes */
-                document.body.style.minHeight = y + "px"; /* Zooming Changes */
-          
-                
-                /*Fix For Bug 17356684 End */
-				//arb changes
-                //setHorizontalPosition( document.getElementById("vtabMin"), false, (document.getElementById("divmenusearch").offsetWidth - document.getElementById("vtabMin").offsetWidth)); citi ui change
-                 setHorizontalPosition(document.getElementById("dashboard"), true, (document.getElementById("vtab").offsetWidth + 2));
-                 setHorizontalPosition( document.getElementById("IFlauncher"), false, (document.getElementById("vtab").offsetWidth));
-          /*     if(LangCode != 'ARB'){
-                  //document.getElementById("vtabMin").style.left = document.getElementById("divmenusearch").offsetWidth - document.getElementById("vtabMin").offsetWidth + "px";
-                  document.getElementById("dashboard").style.marginLeft = document.getElementById("vtab").offsetWidth + 2 + "px";
-                  document.getElementById("IFlauncher").style.left = document.getElementById("vtab").offsetWidth + 2 + "px";
+  </script>
+  <script src="assets/js/envData.min.js" defer=""></script>
+  
+<script>
+  // ================= Idle scheduler (with fallback) =================
+  (function () {
+    function scheduleIdle(fn, timeout = 3000) {
+      try {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(fn, { timeout });
+        } else {
+          // Fallback to small timeout to avoid blocking the critical path
+          setTimeout(fn, Math.min(timeout, 500));
+        }
+      } catch {
+        setTimeout(fn, 0);
+      }
+    }
+    window.scheduleIdle = scheduleIdle;
+  })();
 
-               }
-               else{
-                  //document.getElementById("vtabMin").style.right = document.getElementById("divmenusearch").offsetWidth - document.getElementById("vtabMin").offsetWidth + "px";
-                  document.getElementById("dashboard").style.marginRight = document.getElementById("vtab").offsetWidth + 2 + "px";
-                  document.getElementById("IFlauncher").style.right = document.getElementById("vtab").offsetWidth + 2 + "px";
-               }*/
+  // ================= Idempotent script loader =================
+  (function () {
+    const loaded = new Set();
 
-                if (document.getElementById("vtab").style.display == "none") {
-                    document.getElementById("dashboard").style.width = x-2+"px";
-                }
-                document.getElementById("vTabDB_DASHBOARD").style.height = document.getElementById("dashboard").offsetHeight+"px";
-                var vTabHeight      = document.getElementById("vtab").offsetHeight;
-                if (document.getElementById("vtab").style.display == "none") {
-                    vTabHeight      = document.getElementById("dashboard").offsetHeight;
-                }
-                var headingHeight   = document.getElementById("vTab_Heading").offsetHeight;
-                var vTabCNHeight = vTabHeight - headingHeight;
-                //document.getElementById("vTabCN_EXPLORE").style.height          = vTabCNHeight + "px"; //HTML5 Changes
-                document.getElementById("vTabCN_CENTRAL_PROCESS").style.height  = vTabCNHeight + "px"; //12.0.2 SOATEAM Changes
-                document.getElementById("MinwindC").style.width = document.getElementById("taskbar").offsetWidth - (document.getElementById("MinwindL").offsetWidth + document.getElementById("MinwindR").offsetWidth + 8) + "px";
-            }
+    function loadScript(
+      src,
+      { async = true, defer = false, onload, attrs = {} } = {}
+    ) {
+      if (!src || loaded.has(src)) return null;
+      loaded.add(src);
 
-            function getXmlMenu () {
-                return gXmlMenu;
-            }	  
-            
-            function txn_actions() {
-            this['K\x2BA'] = new Array('New','Print'); this['L\x2BA'] = new Array('New','Copy','Print','Reverse','Rollover','Template'); this['O\x2BA'] = new Array('New','Copy','Close','Unlock','Print'); this['P\x2BA'] = new Array('New','Copy','Unlock','Print','Reverse'); this['S\x2BA'] = new Array('New','Reopen','Print'); this['R\x2BA'] = new Array('New'); this['U\x2BA'] = new Array('New','Close','Confirm'); this['A\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['C\x2BR'] = new Array('New','Copy','Delete','Print'); this['T\x2BA'] = new Array('New','Copy','Print'); this['C\x2BU'] = new Array('New','Copy','Delete','Print','Authorize'); this['W\x2BA'] = new Array('New','Copy','Print'); this['V\x2BA'] = new Array('New','Print'); this['Y\x2BA'] = new Array('New','Copy','Close','Unlock','Print','Reverse','Rollover','Confirm','Liquidate','Template'); this['D\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['X\x2BA'] = new Array('New','Print'); this['F\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['Z\x2BA'] = new Array('New','Copy','Unlock','Print','Reverse'); this['H\x2BU'] = new Array('New','Delete','Unlock'); this['K\x2BU'] = new Array('New','Delete','Print','Authorize'); this['L\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['O\x2BR'] = new Array('New','Copy','Delete','Unlock','Print'); this['O\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['P\x2BU'] = new Array('New','Copy','Delete','Authorize'); this['S\x2BU'] = new Array('New','Delete','Print','Authorize'); this['R\x2BU'] = new Array('New','Delete','Authorize'); this['U\x2BU'] = new Array('New','Delete','Unlock','Authorize'); this['T\x2BU'] = new Array('New','Copy','Delete','Print','Authorize'); this['V\x2BU'] = new Array('New','Delete','Print','Authorize'); this['Y\x2BU'] = new Array('New','Copy','Delete','Unlock','Print','Authorize'); this['X\x2BU'] = new Array('New','Copy','Delete','Print','Authorize'); this['X\x2BX'] = new Array('New'); this['s\x2BA'] = new Array('New','Copy','Reverse','Confirm'); this['r\x2BA'] = new Array('New','Close'); this['A\x2BA'] = new Array('New','Copy','Close','Unlock','Print','Reverse','Rollover','Confirm','Liquidate','Template'); this['C\x2BA'] = new Array('New','Copy','Reopen','Print'); this['E\x2BA'] = new Array('New','Copy','Print'); this['D\x2BA'] = new Array('New','Copy','Print','Reverse','Rollover','Template'); this['s\x2BU'] = new Array('New','Copy','Authorize'); this['F\x2BA'] = new Array('New','Print'); this['I\x2BA'] = new Array('New','Copy','Unlock'); 
-            }
-        
-            
-        
-           // var commonErrors    = new Array(); citi ui change
-           // var gItemDesc       = new Array();citi ui change
-            function commonError(errCode, errDesc)  {
-                commonErrors[errCode] = errDesc;
-            }
-            function getCommonErrorList(){
-                return commonErrors;	
-            }
-            function addItemDescList(itemName, itemDesc){
-                gItemDesc[itemName] = itemDesc;
-            }
-            function getItemDesc(itemName){   
-                return gItemDesc[itemName];
-            }
-        
-            
-            	
-            
-            var g_objCcy = new Array();
-            function loadCcy(ccyCode, NumDigitsAfterDecimal, formatMask, roundRule, roundUnit) {
-                g_objCcy[ccyCode] = new ccy(NumDigitsAfterDecimal, formatMask, roundRule, roundUnit);
-            }
-            
-            var objCcy = new Array();
-            function ccy(numDigitsAfterDecimal, formatMask, roundRule, roundUnit) {
-                this.numDigitsAfterDecimal = numDigitsAfterDecimal;
-                this.formatMask = formatMask;
-                this.roundRule = roundRule;
-                this.roundUnit = roundUnit;
-            }
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = !!async;
+      if (defer) s.defer = true;
+
+      for (const [k, v] of Object.entries(attrs)) s.setAttribute(k, String(v));
+
+      if (typeof onload === 'function') s.addEventListener('load', onload);
+      s.addEventListener('error', () => {
+        console.warn('Failed to load script:', src);
+      });
+
+      document.head.appendChild(s);
+      return s;
+    }
+
+    window.loadScript = loadScript;
+  })();
+
+  // ================= PerformanceObserver for FCP & LCP =================
+  (function () {
+    const state = {
+      fcpFired: false,
+      fcpSubscribers: [],
+      lcpEntry: null,
+      lcpFinalized: false,
+      lcpSubscribers: [],
+      lcpObserver: null,
+    };
+
+    // ----- Subscription helpers (one-shot) -----
+    window.onFCP = function (cb) {
+      if (state.fcpFired) { try { cb(); } catch {} }
+      else { state.fcpSubscribers.push(cb); }
+    };
+
+    window.onLCP = function (cb) {
+      if (state.lcpFinalized && state.lcpEntry) { try { cb(state.lcpEntry); } catch {} }
+      else { state.lcpSubscribers.push(cb); }
+    };
+
+    function notifyFCP() {
+      if (!state.fcpFired || !state.fcpSubscribers.length) return;
+      const subs = state.fcpSubscribers.splice(0);
+      for (let i = 0; i < subs.length; i++) {
+        try {
+          subs[i](); // No data is passed to FCP subscribers
+        } catch (e) {
+          console.log('Error in FCP subscriber:', e);
+        }
+      }
+    }
+
+    function notifyLCP() {
+      if (!state.lcpFinalized || !state.lcpEntry || !state.lcpSubscribers.length) return;
+      const payload = state.lcpEntry;
+      const subs = state.lcpSubscribers.splice(0);
+      for (let i = 0; i < subs.length; i++) {
+        try {
+          subs[i](payload); // LCP subscribers receive the LCP entry as data
+        } catch (e) {
+          console.log('Error in LCP subscriber:', e);
+        }
+      }
+    }
+
+    // ----- FCP observer -----
+    try {
+      const fcpObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        const fcp = entries.find((e) => e.name === 'first-contentful-paint');
+        if (fcp) {
+          state.fcpFired = true;
+          notifyFCP();
+          fcpObserver.disconnect();
+        }
+      });
+      fcpObserver.observe({ type: 'paint', buffered: true });
+    } catch {
+      // If not supported, consider firing FCP after 'DOMContentLoaded' or first render
+      window.addEventListener('DOMContentLoaded', () => {
+        state.fcpFired = true;
+        notifyFCP();
+      }, { once: true });
+    }
+
+    // ----- LCP observer (keep latest candidate; finalize on signals) -----
+    function finalizeLCP() {
+      if (state.lcpFinalized) return;
+      state.lcpFinalized = true;
+      try { state.lcpObserver?.disconnect(); } catch {}
+      state.lcpObserver = null;
+      notifyLCP();
+    }
+
+    // Finalize LCP on first input or when the page becomes hidden (spec guidance)
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') finalizeLCP();
+    }, { once: true });
+
+    window.addEventListener('pagehide', finalizeLCP, { once: true });
+    window.addEventListener('pointerdown', finalizeLCP, { once: true, passive: true });
+    window.addEventListener('keydown', finalizeLCP, { once: true, passive: true });
+
+    // Fallback: finalize after a timeout if no candidates are seen (e.g., background tab)
+    // Adjusted timeout; 5s is a common safe value
+    setTimeout(() => finalizeLCP(), 5000);
+
+    try {
+      const lcpObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        if (!entries || entries.length === 0) return;
+        // Always store the latest candidate (the browser reports increasing candidates)
+        state.lcpEntry = entries[entries.length - 1];
+        // Do not notify yet; finalization will announce the final LCP
+      });
+      lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+      state.lcpObserver = lcpObserver;
+    } catch {
+      // If not supported, you can still defer heavy scripts by time or after FCP
+      console.warn('⚠️  LCP observer not supported');
+      finalizeLCP(); // optionally trigger so subscribers proceed
+    }
+  })();
+</script>
+
+<script>
+  onFCP(() => {
+    loadScript('https://code.jquery.com/jquery-3.7.1.min.js', {
+      async: true,
+      onload: () => {
+        loadScript('assets/js/bootstrap.bundle.min.js', { async: true });
+        loadScript('assets/js/bootstrap-switch.min.js', { async: true });
+      }
+    });
+  });
+
+  
+  onLCP((lcp) => {
+    loadScript('https://www.googletagmanager.com/gtm.js?id=GTM-M8JQCJL', { async: true });
+    scheduleIdle(() => {
+      // const ADOBE_URL = 'https://assets.adobedtm.com/2d6d124a9338/5f15acc76b2f/launch-478c81ab8d73.min.js';
+      // loadScript(ADOBE_URL, { async: true });
+      // loadScript('https://cdn.jsdelivr.net/npm/swiper@11/swiper-element-bundle.min.js', { async: true });
+      loadScript('assets/js/last-click-cookie.min.js', { async: true });
+      loadScript('assets/js/slick.js', { async: true });
+      loadScript('assets/js/common.min.js', { async: true });
+
+      // Load Adobe Launch only after DOM is fully ready
+      const ADOBE_URL = 'https://assets.adobedtm.com/2d6d124a9338/5f15acc76b2f/launch-478c81ab8d73.min.js';
+      if (document.readyState === 'complete') {
+        loadScript(ADOBE_URL, { async: true });
+      } else {
+        window.addEventListener('load', () => {
+          loadScript(ADOBE_URL, { async: true });
+        }, { once: true });
+      }
+    }, 3000);
+  });
+
+  // Optional fallback: if LCP finalization didn’t occur (rare), load GTM post-load
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      // loadScript has internal Set guard, so re-calling is safe (no duplicates)
+      loadScript('https://www.googletagmanager.com/gtm.js?id=GTM-M8JQCJL', { async: true });
+    }, 7000);
+  });
+</script>
+
+
+
+  <!-- <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-element-bundle.min.js" defer></script> -->
+  <!-- <script src="assets/js/bajaj_finserv.js" async></script> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <meta name="theme-color" content="#1976d2">
+
+
+  <!-- <link rel="dns-prefetch" href="//cdn.decibelinsight.net">
+  <link rel="dns-prefetch" href="//collection.decibelinsight.net"> -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <!-- <link rel="preload" href="assets/js/bajaj_finserv.js" as="script"> -->
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  <link rel="preconnect" href="https://ip-dynbanners.bajajfinserv.in" crossorigin="">
+  <link rel="preconnect" href="https://cms-assets.bajajfinserv.in" crossorigin="">
+
+  <!-- <script type="text/javascript" src="https://pushenginewebuat.bajajfinserv.in/3in1web/commonwidget3in1/uat/common_widget.js" async="true"></script> -->
+  <!-- <script id="onboardingMfeScript" src="https://pushenginewebuat.bajajfinserv.in/3in1web/onboarding-web/bfl-login-wc-v1.js" defer></script> -->
+  <!-- for SEO Schema type Organization -->
+
+
+  <link rel="preload" href="https://pushengineweb.bajajfinserv.in/3in1web/assets/fonts/Rubik-Regular.woff" as="font" type="font/woff" crossorigin="">
+  
+  <link rel="preload" href="https://pushengineweb.bajajfinserv.in/3in1web/assets/fonts/Rubik-Medium.woff" as="font" type="font/woff" crossorigin="">
+  
+  <!-- Critical inline CSS with font-display: swap -->
+  <style>
+    @font-face {
+      font-family: 'Rubik-Regular';
+      src: url('https://pushengineweb.bajajfinserv.in/3in1web/assets/fonts/Rubik-Regular.woff') format('woff');
+      font-display: swap;
+    }
     
-            function alert(message) {
-                mask();
-                showAlerts(fnBuildAlertXML('','I',message), 'I');
-                alertAction = "UNMASK";
-            }
-            
-            function confirm(message){
-                var returnVal = window.showModalDialog("ExtAlert.jsp?type=C", message,"dialogLeft:325;dialogTop:270;dialogHeight:200px;dialogWidth:400px;resizable:no;scroll:no;status:no");                             
-                if(returnVal == "CANCEL")
-                    return false;
-                else
-                    return true;
-            }
-            
-            
-                    var ccyCode = "CHF";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "DNK";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "MZN";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "CHE";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "QAR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "SZL";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "BBD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "SAR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "ZMW";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "UGX";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "ZAR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "INR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "TZS";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "CNY";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "THB";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "AUD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "JPY";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "CHW";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "GHS";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "PLN";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "GBP";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "IDR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "BWP";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "TRY";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "GMD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "AED";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "HKD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "MWK";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "EUR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "LSL";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "MGA";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "CAD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "USD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "MUR";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "NOK";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "ZWG";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "NAD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "SGD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "ETB";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "NGN";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "KES";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "SEK";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-                    var ccyCode = "NZD";
-                    var ccyDecimals = "2";
-                    var ccyRoundRule = "R";
-                    var ccyRoundUnit = "0";
-                    var ccyFormatMask = "I";
-                    objCcy[ccyCode] = new ccy(ccyDecimals,ccyFormatMask, ccyRoundRule,ccyRoundUnit);
-                    loadCcy(ccyCode,ccyDecimals,ccyFormatMask,ccyRoundRule,ccyRoundUnit);//FCC compatible code
-                
-            function postLoginDetails(){
-                //var event = window.event || event;  citi ui change
-               // mask(); citi ui  change
-                //fnShowDBoardHome("TRUE",true);citi ui change
-				gXmlMenu = getmenuxml();//  citi ui change
-                var html = ShowMenu(gXmlMenu, "SMAPPBRW", "Templates/XSL/SMAPPBRW.xsl");
-                if(navigator.userAgent.indexOf("MSIE ") != -1 || (navigator.userAgent.indexOf("Trident") != -1 && navigator.userAgent.indexOf("rv") != -1)) {//ie11 changes
-                    document.getElementById("vTabCN_EXPLORE").insertAdjacentHTML("beforeEnd",html);
-                } else {
-                    document.getElementById("vTabCN_EXPLORE").appendChild(html);
-                }
-                if(bpelEnabled == "Y"){
-                    removeReadonlyFuncsFromAppBrw();   
-                    buildTaskArea();
-                    //document.getElementById("vTabCN_CENTRAL_PROCESS").innerHTML = getBPELTaskHTML(); //21374072 Changes
-                }
-                createTree("treemenu1", true);
-                setHeights();
-                document.getElementById("dateli").innerHTML = formattedDate;//Fix for 17156294//HTML5 Changes
-                document.getElementById("datel1").innerHTML = timeZone;//timeZone changes by Shishir
-                
-                
-                
-                
-                
-            }
-            
-            function displayLoginDetails(){   
-                document.getElementById("dateli").innerHTML = formattedDate;//21245896 //HTML5 Changes
-                document.getElementById("datel1").innerHTML = timeZone; //timeZone changes by Shishir
-                var dx = new Date();
-                if(loginDateLast =='null'){
-                        loginDateLast = "";
-                }
-                var l_invalidLogin   = getItemDesc("LBL_INVALID_LOGIN") + noOfInvalidLogins + "~"; 
-                var l_LastLogin      = getItemDesc("LBL_LAST_LOGIN") + fnFormatTimeStampString(loginDateLast) + "~";
-                var l_LoginTime      = getItemDesc("LBL_CURRENT_TIME") + currentTime;
-                var l_PasswdExp      = getItemDesc("LBL_PWD_EXPIRY") + " "+ expirymsgdate + " " +getItemDesc("LBL_DAYS") + "~"; //12_1_RETRO_12_2_23664460
-                if(changeBranch != 'true' && changeDept != 'true' && changeTheme!= 'true'){
-                    if (SSO_REQ != 'Y'){
-                        var warningMsg = "";
-                        if((popupalert == 'Y') && (extPwd != 'Y')) { //Password expiry alert
-                            if(noOfInvalidLogins>0) { 
-                                warningMsg = fnBuildAlertXML("", "I", l_invalidLogin + l_LastLogin + l_PasswdExp + l_LoginTime); 
-                            } else {  
-                                warningMsg = fnBuildAlertXML("", "I", l_LastLogin + l_PasswdExp + l_LoginTime);
-                            }
-                        } else {
-                            if(noOfInvalidLogins>0) {
-                                 warningMsg = fnBuildAlertXML("", "I", l_invalidLogin + l_LastLogin +  l_LoginTime); 
-                            } else {                               
-                                warningMsg = fnBuildAlertXML("", "I", l_LastLogin +  l_LoginTime);     
-                            }
-                    }
-					}else {/*Fix for BugNo:16677336 starts*/
-                        if(noOfInvalidLogins>0) {
-                            warningMsg = fnBuildAlertXML("", "I", l_invalidLogin + l_LastLogin +  l_LoginTime); 
-                        } else {                               
-                            warningMsg = fnBuildAlertXML("", "I", l_LastLogin +  l_LoginTime);     
-                        }
-                    }
-                    /*Fix for BugNo:16677336 ends*/
-                        mask();
-                        alertAction = "LOGIN"
-                        showAlerts(warningMsg, "I");
-                  
-                } 
-				//9NT1606_12_2_RETRO_12_0_3_23654778 starts
-				else{
-                   expandMenu(); 
-                   fnPostLogin();//TERMINAL_NAME_ENH_14.1
-                }
-				//9NT1606_12_2_RETRO_12_0_3_23654778 ends
-                if (typeof(Storage) !== "undefined") {//HTML5 changes 15/DEC/2016 - adding launched function id in fastpath datalist start
-                    var fnids = localStorage.getItem(UserId+"fpFnids");
-                    if(fnids) {
-                        var fnid = fnids.split("~");
-                        var dataList = document.getElementById("fpFuncIdList");
-                        for(var i=0;i<fnid.length;i++) {
-                            if (!dataList) {
-                                var dlElem = document.createElement("DATALIST");
-                                dlElem.id = "fpFuncIdList";
-                                dlElem.setAttribute("id","fpFuncIdList");
-                                document.getElementById("fastpath").parentNode.appendChild(dlElem);
-                                dataList = document.getElementById("fpFuncIdList");
-                            }
-                            var dlOption = document.createElement("OPTION");
-                            dlOption.setAttribute("value",fnid[i]);
-                            setInnerText(dlOption,fnid[i]);
-                            dataList.appendChild(dlOption);
-                        }
-                    }
-                }//HTML5 changes 15/DEC/2016 - adding launched function id in fastpath datalist end
-                if(typeof(branchPlugin) !="undefined" && "Y" == branchPlugin){
-                    fnStartWebSocket();
-                }
-                /*Initializing chatBot*/
-                
-                if(chatBotInstalled !="null" && chatBotInstalled=="Y"){
-                    initChatBot();
-                }
-                /* */
-            }
-        </script><noscript>Script\x20Label</noscript>
-        <script type="text/javascript" src="Script/ExtJS/ExtUtil.js"></script> <noscript>Script\x20Label</noscript> 
-        <script type="text/javascript">
-        
-            var date = new Date();
-            var title            = 'SAI_MAK\x20\x2D\x20999\x20\x2D\x20999\x20\x2D\x20999\x20\x2D\x20Oracle\x20Financial\x20Services\x20\x2D\x20ENG\x20\x2D\x20'; 
-            var CurrentModule    = 'null';
-            var applicationName  = 'FCJ';    
-            var applicationExt   = 'FCROFC';
-            var systemDateFormat = 'YYYY\x2DMM\x2DDD';
-            var nlsAmtFmt        = '.,';
-               var dashboardReqd        = 'N';
-            var alerthomeReqd        = 'N';
-            var extalertReqd         = 'null';//external alert changes
-            var dateDelimiterReqd    = 'N'; //9NT1606_14_0_RETRO_12_0_3_27393036 changes
-            /*12.0.2 Screen Saver Changes Starts*/
-            var scrSaverTime        = '300';
-            var extPwd         ='N';
-            /*12.0.2 Screen Saver Changes ends*/
-            var gDecimalSymbol   = nlsAmtFmt.substring(0,1);
-            var gDigitGroupingSymbol = nlsAmtFmt.substring(1);
-            var gNegativeSymbol = '\x2D';
-            var gNegativeFormat = "-1";
-            var labelBranchCode =  'Branch\x20Code'; /* Bug_37347876 */
-            var labelEntityId   =  'Entity\x20Id'; /* Bug_37347876 */
-            if(applicationName == "FCJ" || applicationName == "FGL") {  
-            curDate = '2026\x2D02\x2D03';
-//			//Bug 25733025 changes Start
-//			   var defaultDate = "true";
-//				if(defaultDate == "false")
-//				{
-//				 var curDate = '2026\x2D01\x2D28'; 
-//				}
-//				else
-//				{
-//				 var curDate = '2026\x2D02\x2D03';
-//				}
-//			//Bug 25733025 changes End
-            } else if(applicationName == "FCIS") {         
-                var curDate = 'null';
-            }
-
-            var dateComp = curDate.split("-",-1);
-			var formattedDate = getSystemShortDate(parseInt(dateComp[0],10),parseInt(dateComp[1],10),parseInt(dateComp[2],10) );//fix for 17156294			
-            var EndOfInput = "";
-            if(applicationName == "FCJ" || applicationName == "FGL"){                
-                var strEODInputLabelDesc = 'LBL_TRANSACTION_INPUT';
-                EndOfInput   = getItemDesc(strEODInputLabelDesc);                               
-            }else{
-                var onlineStatus = 'T';
-                if(onlineStatus == "N")
-                    EndOfInput = 'Online';
-                else
-                    EndOfInput = 'Offline';
-            }
-        title +=   EndOfInput ;
-        document.write('<TITLE>'+title + '</TITLE>');
-        window.onorientationchange = setHeights;//HTML5 Changes
-        </script><title>SAI_MAK - 999 - 999 - 999 - Oracle Financial Services - ENG - Transaction Input</title><noscript>Script\x20Label</noscript>
-        
-        <script type="text/javascript" src="Script/JS/TaskList.js"></script> <noscript>Script\x20Label</noscript>
-		
-        <script type="text/javascript" src="Script/JS/CustDetail.js"></script> <noscript>Script\x20Label</noscript>
-		
-        <script type="text/javascript" src="Script/JS/SmmsgBox.js"></script> <noscript>Script\x20Label</noscript>
-         
-        <script type="text/javascript" src="Script/JS/BROWSER_NonIE.js"></script> <noscript>Script\x20Label</noscript>        
-         
-        <script type="text/javascript" src="Script/JS/Alert.js"></script> <noscript>Script\x20Label</noscript>
-        <script type="text/javascript" src="Script/JS/SmmdiFrm.js"></script> <noscript>Script\x20Label</noscript>    
-		<script type="text/javascript" src="Script/JS/SMMDIFRM_CUSTOM.js"></script> <noscript>Script\x20Label</noscript> 
-        <script type="text/javascript" src="Script/JS/SmAppBrw.js"></script> <noscript>Script\x20Label</noscript> 
-        <script type="text/javascript" src="Script/JS/SmhTlBar.js"></script> <noscript>Script\x20Label</noscript> 
-       
-       
-       
-        <script type="text/javascript" src="Script/ExtJS/ExtUIUtil.js"></script> <noscript>Script\x20Label</noscript> 
-        <script type="text/javascript" src="Script/JS/UserAlerts.js"></script> <noscript>Script\x20Label</noscript>
-        
-		
-        
-        
+    @font-face {
+      font-family: 'Rubik-Medium';
+      src: url('https://pushengineweb.bajajfinserv.in/3in1web/assets/fonts/Rubik-Medium.woff') format('woff');
+      font-display: swap;
+    }
+    
+    body {
+      font-family: 'Rubik-Regular';
+    }
+  </style>
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- <!-- 12.2 Branch Coop entity added-->
-
-   
-        <script type="text/javascript">
-            var ldapuser            =   ''; //LDAP_POC_Changes        
-         //Added for Country_code --start
-        var countryCode = 'LS';
-         
-          
-         var currentTime = '12\x3A35\x3A59';
-          
-            var VIEWMAINT           =   '';
-            var addonGlobal         =   new Array();
-            var AppSource           =   "FLEXCUBE";
-            var AccountMask 	    = 	'null';
-            var AppDate 	    = 	'2026\x2D02\x2D03';
-            var CurrBranchDate      =   '';
-            var CurrentBranch	    =	'999';
-            var DefaultModule	    =	'null';
-            var CurrentModule	    =	'null';// fcis
-            var dsnName             =   'INIT_DSN';// fcis
-            var CurrentBranchName   =   'LESOTHO\x20POSTBANK\x20HEAD\x20OFFICE';
-            var Debug		    = 	'N';
-			var multiBranchModule         =   'N'; //FCIS MultiModule Changes
-            var CurrentDept	    =	'';
-            var HomeDept	    =	''; 
-            var LangISOCode 	    = 	'en';
-            var LangCode 	    = 	'ENG';
-            var Lcy		    =	'LSL';
-            var HostCode		    =	'HOST1';//12.3 Core Host Code Change
-            var SignonSerial 	    = 	'60453721';	
-            var UIXmlPath 	    = 	'UIXML';
-            var XslPath 	    = 	'Templates/XSL';
-            var UserId		    =	'SAI_MAK';
-            var gWeeklyHol1         =   '\x20';
-            var gWeeklyHol2         =   '\x20';
-            var BranchLcy           =   'LSL';
-            var HOBranch            =   '999'; 
-            var HOMEBranch          =   '999'; 
-            var HOMEEntity          =   'ENTITY_ID1';  //SMSStandalone12.3 Changes
-            var CurrentEntity       =   'ENTITY_ID1'; //SMSStandalone12.3 Changes
-            var CurrentCycle        =   'FY2026'; 
-            var CurrentPeriod       =   'M02';
-            var BankCode 	    = 	'072';  
-			var BankName            =  'LESOTHO\x20POST\x20BANK';//9NT1606_12_4_RETRO_12_0_3_26233076
-            var CurrBranchName      =  'LESOTHO\x20POSTBANK\x20HEAD\x20OFFICE';//9NT1606_12_4_RETRO_12_0_3_26233076			
-            var BranchEoi           =   'N'; //Branch End of Input Status.
-            var applicationName     =   'FCJ';
-            if(applicationName == "FCIS")
-                AppDate 	    = 	'null';    
-            var dispSize            =   '254';   
-            var applicationExt      =   'FCROFC';    
-            var strTheme            =   'Flexblue.css';
-            var browserCSS          =   'BROWSER_GO.css';
-            var defaultstyle        =   'Flexblue\x7ED\x21Demo\x21';
-            var SSO_REQ             =   'N'; //FCUBS10.0 SSO 
-          	//BUG#32891272: Changes Start
-          	// IDCS SSO-Signoff
-          	var SSO_TYPE     =   'null';
-            var SSO_SIGNOFF_REQ     =   'N';  
-            var SSO_SIGNOFF_URL     =   ''; 
-            var SSO_SIGNOFF_POST_RD_URL     =   '';
-           //BUG#32891272: Changes End
-            var mBean_required      =    'Y';    
-            //12.2 Branch Coop entity added fbContext as getCacheFBTBParams argument
-			var denomBasedTracking  =   '8206,8207,8004,8203';  //9NT1620_FCUBS_12.0.3_INTERNAL_18325754       
-			  var amountBasedSV  =   'N';  //12.1_SV_Changes
-            var CSRFtoken           =   'B802A8DB58F2B2302B5E10C1F23A5BB58562D81106BB10F6CDE1088B260734D4';/*10.5.2 CSRFTOKEN changes*/
-            var FCJ_Stream          =   '';
-            var curr_user           =   'SAI_MAK';    
-            var expirymsgdate       =   '';
-            var licensemsg          =   'null'; 
-            var popupalert          =   'N';     
-            var langISOCode     = 'en';
-            var hotkeyFnids     = 'null';
-            var hotkeyArray     = new Array();
-            if (hotkeyFnids != "")
-                hotkeyArray     = hotkeyFnids.split("__");
-            var multiBranchOperation         = 'N';
-            var elcmuserId          = 'SAI_MAK';
-			//Fix for 18635762 -User Level Hot Key restriction starts
-            var f10_Reqd          = 'Y';
-            var f11_Reqd          = 'Y';
-            var f12_Reqd          = 'Y';
-            //Fix for 18635762 -User Level Hot Key restriction ends
-			var countAlerts         = '0';
-            var userTaskStatusCnt   =   '0';     
-            var autoGenPassReq      = 'N' ;
-            var userAlertCount      = '0';
-            var elcmMode      = 'S'; //External Function ID Changes
-            var ValidateFlag        =   'Y';
-            var gOfflineAllowed     =   'N';
-            //FCUBS11.1 CROSSBROWSER Changes starts here
-            var gTxn = "";
-            var gStage = "";
-            //FCUBS11.1 CROSSBROWSER Changes ends here
-
-            var ACTIONNEW           =   'New';
-            var ACTIONCOPY          =   'Copy';
-            var ACTIONSAVE          =   'Save';
-            var ACTIONUNLOCK        =   'Unlock';
-            var ACTIONCLOSE         =   'Close';
-            var ACTIONREOPEN        =   'Reopen';
-            var ACTIONDELETE        =   'Delete';
-            var ACTIONPRINT         =   'Print';
-            var ACTIONSIGNOFF       =   'SignOff';
-            var ACTIONEXIT          =   'Exit';
-            var ACTIONEXITCURRENTWINDOW = 'ExitCurrWin';
-            var ACTIONAUTHORIZE     =   'Authorize'; 
-            var ACTIONROLLOVER      =   'Rollover';
-            
-            var ACTIONDELEGATE      =   'Delegate';
-            var ACTIONREVERSE       =   'Reverse';
-            var ACTIONCONFIRM       =   'Confirm';
-            var ACTIONLIQUIDATE     =   'Liquidate';
-            var ACTIONHOLD          =   'Hold';
-            var ACTIONTEMPLATE      =   'Template';
-            var ACTIONVIEW          =   'View';
-            var ACTIONGENERATE      =   'Generate';
-            var DebugWindowFlg      =   'N';
-            var DebugFlg            =   'N';
-            var dbgLoggingRqd       =   'N';//Debug Changes Start
-            var DebugStmt           =   '';
-            var serverDebugStmt     =   '';
-            var debugWindow         =   null;
-            var isAuthOpen  	    =   false;
-            var isViewAuthOpen 	    =   false;
-            var slipopened          =false;
-            var branchIdentifier    =   'Y';
-            var branchWorkflowFrequency	= '600000'; //FCUBS11.1 Changes For Auto Refresh
-            var reportURL           =   'Reports/BIP/' + LangCode +'/';
-            var xmlFileNAME         =   null;
-            var gHelpXML            =   null;
-            var nodeEdited          =   new Array();
-            
-            var prevOriginalContent =   "";
-            var helpContent         =   null;
-            var tabContent          =   null;
-            var searchContent       =   null;
-            var longTitle           =   "Long Description Editing Section";
-            var shortTitle          =   "Short Description Editing Section";
-            var nodeValue           =   null;
-            var helpFlPath          =   null;
-            var prevNodeValue       =   null;
-            var domValueLong        =   null;
-            var domValueShort       =   null;
-            var Authdom             =   null;
-            var cacheContent        =   'D'; 
-            var Horzbar             =   'Y';
-            var Vertbar             =   'Y';
-            
-            var loginDateLast                  = '2026\x2D01\x2D28\x2012\x3A35\x3A31';
-            var noOfInvalidLogins              = '0'; 
-            
-            
-            var auto_auth                      = 'null';  
-            var auth_mesg                      = 'null';  
-            var eodFunctions	               = 'ICRACCR__STGVIRAC__STDLMRVL__LDRPACCR__LDRPCALC__TDRFULBL__IPRACCR__IPRIP__IPRISFM__IPRLIQR__CYDSPRDF__OLDCOROL__ACRJRNAL__ACRREVAL__OLDRPAUT__OLDRSAUT__OLDTRAUT__OLDTROIC__OLDTRONL__OLDTROSI__OLDVAMND__OLDVAMSI__OLDVMAUT__LMSCUSLT__RLRPCAUR__RLRPFNCR__RLRPPFCR__RLRPUNMI__RLRPUNMN__RLRPUNMU__ELRPUTLD__RPRCNDLG__CARPBALC__CIRPACCR__STQVIRAC__OLDPMAUT__OLDPMNSI__OLDPMNT__AEDBRMTR__AEDSTART__AEDSTOP__AESBRMTR__CLRPACCR__CLRPMATR__CLRPOSCH__CLRPREVN__GLRPBAL__GLRPBASH__GLRPCCY__GLRPPNL__GLRPTBAL__GLRSUREP__SVRACREP__SVRADREP__SVRAOREP__SVRLBALM__SVRREPRT__CSRPACTJ';
-            var branchTrackingFor	           = 'N'; //FCUBS121DEV_DENOM_TRACKING_BRANCH_LEVEL
-            var multiBranchFunctions	       = '';
-            var lovDataFetch                   = 'Y';
-            var req_Enc_Reqd                   = 'N'; // Login Encryption Changes
-            var txnBranch                      = new Array();
-            // Changes for formatting number --start
-            var gNumberFormatMask              = 'M';
-            // Changes for formatting number --end
-            var gDebugWindowEnabled               = 'Y'//Changes for FE Debug Window
-             
-            var screenSaverTimeOut=  '300' ;/*12.0.2 Screen Saver Changes Start*/
-			var gFcjInsulation =  'N'; //FCJ_INSULATION
-			var gCustInfo                      = new Array();
-            
-                    addonGlobals('TRACE_PARAM', 'N');
-                    
-                function addonGlobals(ucKey, ucValue) {
-                    addonGlobal[ucKey] = ucValue;
-                }
-            
-            var SIGNOUT = getItemDesc("LBL_SIGNOUT_DESC");
-            var EXIT    = getItemDesc("LBL_EXIT_DESC");
-            var g_objCcy = parent.g_objCcy;
-            
-            var nlsAmountFormat = ".,";
-            var dashboardFuncs  = "";
-            var terminalName = '192.168.50.98';//TERMINAL_NAME_ENH_14.1
-            
-            function fnLoad(){
-            
-                if(changeBranch != 'true' && changeDept != 'true' && changeTheme != 'true'){
-                    if(loginDateLast =='null'){
-                        loginDateLast = "";
-                    }            
-                }
-                isAppGlobalLoaded=true;
-                //var d1 = new Date();   
-                //var startUp1= "\n --Appglobal end" + d1.getHours() + ":" + d1.getMinutes()+ ":" +d1.getSeconds()+":"+d1.getMilliseconds() ;  
-                //alert(startUp1);            
-            }
-            
-            var functionDef = new Array();
-            var funcArray = new Array();
-            
-            function setFunctionDefn(functionId, obj) {
-                var len = funcArray.length;
-                funcArray[len] = new Object();
-                funcArray[len].functionId = obj.functionId;
-                funcArray[len].functionDesc = obj.functionDesc;
-                funcArray[len].txnLegCash = obj.txnLegCash;
-                funcArray[len].ofsLegCash = obj.ofsLegCash;
-                funcArray[len].txnCcyField = obj.txnCcyField;
-                funcArray[len].txnAmtField = obj.txnAmtField;
-                funcArray[len].ofsCcyField = obj.ofsCcyField;
-                funcArray[len].ofsAmtField = obj.ofsAmtField;
-                funcArray[len].chargeCcyField = obj.chargeCcyField;
-                funcArray[len].chargeAmtField = obj.chargeAmtField;
-                funcArray[len].chargeCash = obj.chargeCash;
-                funcArray[len].fractionalAmtField = obj.chargeCash;
-                funcArray[len].fractionalAmtLCYField = obj.fractionalAmtLCYField;
-                funcArray[len].fractionalAmtAgainst = obj.fractionalAmtAgainst;
-                funcArray[len].tillReqd = obj.tillReqd;
-                funcArray[len].offlineSupport = obj.offlineSupport;
-                funcArray[len].txnType = obj.txnType;
-                funcArray[len].denominationTrackingRequired = obj.denominationTrackingRequired;
-                funcArray[len].reversalAllowed = obj.reversalAllowed;
-                funcArray[len].adviceReqd = obj.adviceReqd;
-                funcArray[len].queryStage = obj.queryStage;				
-                funcArray[len].txnSeqReqd = obj.txnSeqReqd;	
-                // FCUBS 11.4 InputSlip Changes Starts
-                funcArray[len].slipReqd = obj.inputSlipRequired;
-                // FCUBS 11.4 InputSlip Changes Ends
-                // FCUBS 11.4 Confirmation Changes Starts
-                funcArray[len].confirmReqd = obj.confirmRequired;
-                funcArray[len].confirmErrType = obj.confirmErrType;
-                funcArray[len].confirmMsgCode = obj.confirmMsgCode;
-                // FCUBS 11.4 Confirmation Changes Ends
-                //9NT1525_120_16066792 Starts
-                funcArray[len].amountTag = obj.amountTag;
-                funcArray[len].xRate = obj.xRate;
-                //9NT1525_120_16066792 Ends
-                //12.0.2_Signature_Verification start
-                funcArray[len].signVerSupp = obj.signVerSupp;
-                funcArray[len].txnAcc = obj.txnAcc;
-                funcArray[len].signVerReqd = obj.signVerReqd; 
-                //12.0.2_Signature_Verification end
-				//12.0.2_single_step_process
-                funcArray[len].twoStepProcessing = obj.twoStepProcessing;
-                funcArray[len].newFlow = obj.newFlow;
-                 //12.0.2_single_step_process
-                funcArray[len].ccyTag = obj.ccyTag;  //9NT1587_1203_UCBL_18367369 added
-                funcArray[len].authMode = obj.authMode; //9NT1525_1203_RETRO_INTERNAL_18669470 added  
-                 //12.1_disabling_call_form_and_exchrate_based_on_workflow starts
-                 funcArray[len].exchangeRateAmendable = obj.exchangeRateAmendable; 
-                funcArray[len].misAmendable = obj.misAmendable; 
-                funcArray[len].udfAmendable = obj.udfAmendable; 
-                funcArray[len].chargeAmendable = obj.chargeAmendable; 
-                 //12.1_disabling_call_form_and_exchrate_based_on_workflow ends
-                 //12.1_multI_auth starts
-                funcArray[len].multiAuthReqd  = obj.multiAuthReqd;
-                 funcArray[len].sequential = obj.sequential;
-                 funcArray[len].amendAfterAuth = obj.amendAfterAuth;   
-                  //12.1_multi_auth ends               
-				funcArray[len].pMandatory = obj.pMandatory;//Pickupmandatorychanges
-				funcArray[len].dupAdviceTrack = obj.dupAdviceTrack; //FCUBS_121DEV_ADVICE_REPRINT_CHANGES
-				funcArray[len].pickBtnFields = obj.pickBtnFields;//12.1_Fields_Disabling_changes 
-				  //FCUBS_121DEV_REVERSAL_ADV_RED
-                funcArray[len].reversalAdviceRequired = obj.reversalAdviceRequired;
-                funcArray[len].reversalOnlineadviceName = obj.reversalOnlineadviceName;
-                
-                  //FCUBS_121DEV_REVERSAL_ADV_RED
-		  funcArray[len].decentralizedFlow = obj.decentralizedFlow;//12.1_Decentralized_Changes
-                functionDef[functionId] = funcArray[len];
-            }   
-            var CustomerObj = null;
-            function getCustomer(pCustId,pCustName,pCustAddr,pBrnCode){//FCUBS 10.5 STR2 WebBranch Changes
-                this.custId = pCustId ;
-                this.custName = pCustName;
-                this.custAddr = pCustAddr;
-                this.brnCode = pBrnCode;//FCUBS 10.5 STR2 WebBranch Changes
-                return this;
-            }
-        
-            function setAccountDetails(pAccountNumber) {
-                this.accountNumber = pAccountNumber;
-                return this;
-            }
-            function getBpelFunctionIdRights(){
-            }
-               
-        </script>
-        <noscript>Script\x20Label</noscript>
-
-
-    </head>
-    <body class="BDYlanding" onload="setHeights();displayLoginDetails();fnShowDBoardHome('TRUE',true);" onbeforeunload="doBeforeUnload(event);" onunload="doUnload(event)" onkeydown="return doKeyAction(event)" oncontextmenu="return false;" onhelp="return false;" style="min-width: 920px; min-height: 730px;"> <!--9NT1606_14_1_RETRO_12_4_28118860-->
-        <div id="masthead" class="DIVtab" style="width: 918px;">
-         
-         <div id="menuDetail" class="DashDIVnav" style="display: block; top: 79px; width: 918px;">
-          <span class="loginLogo1">
-          <span class="LogoOracle" style="display:block" title="null"></span>
-          </span>
-           <span class="TBgpFL" role="menubar" id="menuBarSpan" aria-hidden="false" style="width: 734px;">
-            <span class="detailnavrgt"><!--HTML5 Changes Start-->
-            <div id="nav" onkeydown="handleMenuKeys(event);"><span onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)">
-                <div class="inD fText">
-                    <!--Fix for 21231772 starts-->
-                    <!--Fix for 21236439 -->
-                            <label class="LBLmenustd">Multi Factor Not Authenticated</label>
-                        <!--Fix for 19049454 ends-->
-                    <!--Fix for 21231772 ends-->
-                </div>
-
-                    
-
-                <div class="inD">
-                    <ul>
-    <!--HTML5 Changes 3/OCT/2016 start-->                   
- <li tabindex="0" role="presentation" onclick="showMenu(this, true, event)" accesskey="M" id="Entity_Menu" title="ENTITY_ID1" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" class="entity btt">
-                            <label class="LBLmenustd">Entity :&nbsp;ENTITY_ID1</label>
-                    </li></ul>
-                    <ul class="listPop" role="menu" aria-hidden="true" aria-labelledby="Entity_Menu">
-					
-                            <li role="presentation" id="select_entity" tabindex="0" onclick="disp_lov('COMMON','BLK_ENTITY_DETAILS','ENTITY_ID',labelEntityId,'LOV_ENTITY', '', '', '', '', event);hideMenu(this, true, true);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true);" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"> 
-                            Select Entity
-                            </li> 
-                            <label for="BLK_ENTITY_DETAILS__ENTITY_ID" class="LBLinv"></label>
-                            <input type="hidden" class="LBLinv" value="" name="ENTITY_ID" id="BLK_ENTITY_DETAILS__ENTITY_ID" style="">
-                    </ul>
-                </div>
-                    
-                                 
-                
-                <div class="inD">
-                    <ul>
-                        
-                            
-                                <li tabindex="0" role="presentation" onclick="showMenu(this, true, event)" accesskey="B" id="Branch_Menu" title="999" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" class="bank btt"><!--HTML5 Changes 6/OCT/2016-->
-                                    <label class="LBLmenustd">Branch :&nbsp;999</label>
-                                </li>
-                            <!--HTML5 Changes 3/OCT/2016 end-->
-                    </ul><ul class="listPop" role="menu" aria-hidden="true" aria-labelledby="Branch_Menu">
-                        
-                        
-                            <li role="presentation" id="select_branch" tabindex="0" onclick="disp_lov('SMCHGBRN','BLK_BRANCH','BRANCH_CODE',labelBranchCode,'LOV_CHANGE_BRANCH_CODE', '', '', '', '', event);hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                Select Branch
-                            </li>
-                            <label for="BLK_BRANCH__BRANCH_CODE" class="LBLinv"></label>
-                            <input type="hidden" class="LBLinv" value="" name="BRANCH_CODE" id="BLK_BRANCH__BRANCH_CODE" style="">
-                            <label for="BLK_BRANCH__STAGE" class="LBLinv"></label><!--HTML5 Changes 14/NOV/2016 Fix for 24942185-->
-                            <input id="BLK_BRANCH__STAGE" name="STAGE" type="hidden" value="" style="">
-                            <li role="presentation" id="home_branch" tabindex="0" onclick="chgBrn();hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                Home Branch
-                            </li>
-                        
-                    </ul>
-                            
-                </div>
-                <div class="inD">
-                    <ul>
-                        <li tabindex="0" role="presentation" onclick="showMenu(this, true, event)" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" class="time"><!--HTML5 Changes--><!--HTML5 Changes 6/OCT/2016-->
-                            <label class="LBLmenustd" id="dateli">2026-02-03</label>
-                        </li>
-                    </ul>
-					<ul id="menu" class="listPop" style="width:auto;">  <!--Fix for 28682961-->
-                        <li id="sesTime" tabindex="0" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Session Time :">00:00:30</li>
-                        <!--timeZone changes by Shishir Start-->
-                        <li id="datel1" tabindex="0" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" %="">Africa/Maseru</li>
-                        <!--timeZone changes by Shishir End-->
-                    </ul>
-
-                </div>
-                <div class="inD" id="windowDiv">
-                    <ul>
-                        <li class="window" id="window" role="presentation" title="Window" tabindex="0" disabled="true" accesskey="N"><!--HTML5 Changes 6/OCT/2016--><!--HTML5 changes 2/NOV/2016 Fix for 24940888-->
-                            <label class="LBLmenustd">Window</label>
-                        </li>
-                    </ul><ul id="wndMenu" role="menuitem" aria-hidden="true" class="listPop"></ul>
-                </div>
-                <div class="inD">
-                    <ul>
-                        <li tabindex="0" class="user" onclick="showMenu(this, true, event)" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" role="presentation"><!--HTML5 Changes--><!--HTML5 Changes 6/OCT/2016-->
-                            <label class="LBLmenustd">SAI_MAK</label>
-                        </li>
-                    </ul><ul class="listPop">
-                        
-                            
-                                <li role="presentation" tabindex="0" onclick="dispHref('SMDHOTKY','', '', '');hideMenu(this, true, true, event);" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);"><!--HTML5 Changes 6/OCT/2016-->
-                                    User Hotkey
-                                </li>
-                                  
-                            <li role="presentation" title="User Settings" tabindex="0" onclick="showChangePassword('SMUSRSET.jsp');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                User Settings
-                            </li>
-                             
-                                <li role="presentation" tabindex="0" onclick="showChangePassword('SMCHGPWD.jsp');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Change Password" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                    Change Password
-                                </li>
-                            
-                            
-                                <li role="presentation" tabindex="0" onclick="dispHref('SMDMBEAN','', '', '');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Performance Statistics" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                    Performance Statistics
-                                </li>
-                            
-                            
-                                <li role="presentation" tabindex="0" onclick="debugFlg(event);debugWindowFlg(event);hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Debug Window" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                    Debug Window
-                                </li> 
-                            
-                            
-                                <li role="presentation" tabindex="0" onclick="dispHref('CLRU','', '', '');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Clear User" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                                    Clear User
-                                </li>
-                            
-                        
-                        <li class="pD" role="presentation" accesskey="0" tabindex="0" onclick="fnShowToolbarScreen('AccessKeyDetails.jsp');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="Accessibility" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                            Accessibility
-                        </li>
-                        <li role="presentation" tabindex="0" onclick="fnShowToolbarScreen('about.jsp');hideMenu(this, true, true, event);" onkeydown="return handleKeys(this, true, event);hideMenu(this, true, true, event);" title="About" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                            About
-                        </li>
-                            
-                        <li class="pD" onclick="doAction('SignOff',event);hideMenu(this, true, true, event);" role="presentation" accesskey="G" onkeydown="return handleKeys(this, true, event);return hideMenu(this, true, true, event);" tabindex="0" onmouseover="showMenu(this, true, event)" onmouseout="hideMenu(this, true, false, event)"><!--HTML5 Changes 6/OCT/2016-->
-                            Sign Off
-                        </li>
-                    </ul> 
-                </div>
-                <div class="inD">
-                    <ul>
-                        <li role="presentation">
-                            <span class="TBgp3">
-                            <label class="LBLinv" for="fastpath">Fast Path</label><!--HTML5 Changes 14/NOV/2016 start-->
-							 <!--Fix for 32691266- Increased the width-->
-                            <input class="TXTstd" tabindex="0" accesskey="f" name="fastpath" id="fastpath" size="10" style="width: 8em;" maxlength="12" value="" placeholder="E.g.ABCD123" onkeyup="return fnHTLBarKeyEvents(event);" onmousedown="return fnHTLBarKeyEvents(event);" onfocus="showMenu(this, false, event);" onchange="fnToUppercase(this, event);" title="Function Id" type="text" list="fpFuncIdList"><!--HTML5 Changes 22/NOV/2016--> <!--9NT1606_12_4_RETRO_12_3_26724248 changes -->
-                            
-                            <button class="BTNicon" id="btnGo" tabindex="0" onclick="doAction('Go',event);" onkeydown="return handleActionKeys(this, event)" title="Go" onfocus="this.className='BTNiconH'" onblur="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onmouseout="this.className='BTNicon'"><span class="ICOgo"><span class="LBLinv">Go</span></span></button><!--HTML5 Changes 6/OCT/2016-->
-                            <!--HTML5 Changes 14/NOV/2016 end-->
-                            </span>
-                        </li>
-                    </ul>
-                </div>
-            </span>
-            </div>
-            </span><!--HTML5 Changes End-->
-           </span>
-         </div>
-            <div id="SYS_TBL_TABS" style="clear: both; padding-top: 2px; width: 918px;">
-                <a class="hamMenu" id="menuExpandCollapse" accesskey="2" title="Expand Menu" onclick="showHideVtab(event)" href="#"></a><!--HTML5 Changes --><!--HTML5 changes 24/OCT/2016 Fix for 24942196-->
-                <ul id="dboardtablist">
-                    <li id="">
-                        <a accesskey="H" id="DBoardHome" selected="false" class="Htabsel" href="#hrefDBoardHome" tabindex="0" onkeydown="return handleTabKeys(this,event)" onmouseover="setTabClass(this,&quot;onmouseover&quot;)" onblur="setTabClass(this,&quot;onblur&quot;)" onmouseout="setTabClass(this,&quot;onmouseout&quot;)" objclicked="true" objvisited="true" title="(selected)" onclick="showDBoardTabs(&quot;DBoardHome&quot;, event)"><span>&nbsp;Home</span></a></li>
-                     
-                     
-                    <li id="">
-                        <a accesskey="I" id="DBoardMessages" selected="false" class="Htaball" href="#hrefDBoardMessages" tabindex="0" onkeydown="return handleTabKeys(this,event)" onmouseover="setTabClass(this,&quot;onmouseover&quot;)" onblur="setTabClass(this,&quot;onblur&quot;)" onmouseout="setTabClass(this,&quot;onmouseout&quot;)" objclicked="false" objvisited="true" onclick="showDBoardTabs(&quot;DBoardMessages&quot;, event)" style="display: block;"><span>&nbsp;Interactions</span></a></li>
-                    
-                        <li id="">
-                            <a accesskey="U" id="DBoardNextGenUI" selected="false" class="Htaball" href="#hrefDBoardNextGenUI" tabindex="0" onkeydown="return handleTabKeys(this,event)" onmouseover="setTabClass(this,&quot;onmouseover&quot;)" onblur="setTabClass(this,&quot;onblur&quot;)" onmouseout="setTabClass(this,&quot;onmouseout&quot;)" objclicked="false" objvisited="true" onclick="showDBoardTabs(&quot;DBoardNextGenUI&quot;, event)"><span>&nbsp;Next Gen UI</span></a></li>
-                    
-                    
-                     
-                    
-                    <li id="">
-                        <a accesskey="C" id="DBoardCustomer" selected="false" class="Htaball" href="#hrefDBoardCustomer" tabindex="0" onkeydown="return handleTabKeys(this,event)" onmouseover="setTabClass(this,&quot;onmouseover&quot;)" onblur="setTabClass(this,&quot;onblur&quot;)" onmouseout="setTabClass(this,&quot;onmouseout&quot;)" objclicked="false" objvisited="true" onclick="showDBoardTabs(&quot;DBoardCustomer&quot;, event)"><span>&nbsp;Customer</span></a>
-                    </li>
-                
-                        
-                     
-					
-                    
-					
-                    
-                    
-                    <li id="">
-                        <a accesskey="P" id="DBoardMyDashBoard" selected="false" class="Htaball" href="#hrefDBoardMyDashBoard" tabindex="0" onkeydown="return handleTabKeys(this,event)" onmouseover="setTabClass(this,&quot;onmouseover&quot;)" onblur="setTabClass(this,&quot;onblur&quot;)" onmouseout="setTabClass(this,&quot;onmouseout&quot;)" objclicked="false" objvisited="true" onclick="showDBoardTabs(&quot;DBoardMyDashBoard&quot;, event)"><span>&nbsp;Preferences</span></a></li>
-               
-               </ul>
-              
-                <div id="btnDiv12">
-                     
-                    <button onclick="fnRefreshDashBoardData1(event)" class="Abut" id="btnrefresh" accesskey="1" disabled="">
-                    <span class="WidgetoneRefresh" title="Refresh"></span>
-                     
-                    </button>  
-                   
-              </div>
-              <div id="btnDiv">
-                    <button onclick="fnUpdateNavButtons('PREVIOUS')" disabled="" class="Abut" id="btnprev">
-                    <span class="WidgetonePrevious" title="Previous"></span>
-                    </button>
-                    <button onclick="fnUpdateNavButtons('NEXT')" disabled="" class="Abut" id="btnnext">
-                    <span class="WidgetoneNext" title="Next"></span>
-                    </button>
-                </div>
-               </div>
-                 
-          
-            
-        </div>
-        <div class="sPanl" id="leftpanel" style="top: 74px;"><!--HTML5 Changes Start-->
-            <div id="menuHeaderDiv" class="dashbg" style="clear:both;position: relative; height: 22px; background-color: #f9eff0;"> <!--citi ui change start-->
-            <div id="divmenusearch" style="display:none;width:23%"> 
-                <!--<span class="DashDIVnav1" id="vTab_Heading1">
-                    <h2 class="SPNvtabH" id="vTab_HeadingTop2" accesskey="8" style="padding-bottom:0px;">Next Gen UI</h2>
-                    <span class="TBgp3" style="float:none;">
-                        <label class="LBLinv" for="MenuSearch">Menu Search</label>
-                        <button class="BTNicon" id="btnMenuSearch" onclick="fnQuickSearch1();" onkeydown="return handleActionKeys(this, event)" title="Menu Search" onfocus="this.className='BTNiconH'" onblur="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onmouseout="this.className='BTNicon'"><span class="ICOgo">
-                        <span class="LBLinv">Go</span></span></button>
-                    </span>
-                </span>-->
-                <span class="DashDIVnav1" id="vTab_Heading">
-                    <h2 class="SPNvtabH" id="vTab_HeadingTop1" accesskey="3" style="padding-bottom:0px;">Search</h2> <!--Fix for 21312632,21609958 -->
-                    <span class="TBgp3" style="float:none;">
-                        <label class="LBLinv" for="MenuSearch">Menu Search</label>
-                        <input class="TXTstd" accesskey="s" name="MenuSearch" id="MenuSearch" size="20" maxlength="50" value="" placeholder="E.g. Customer" onkeydown="return fnHTLBarKeyEvents(event);" onmousedown="return fnHTLBarKeyEvents(event);" title="Menu Search" type="text" style=""><!--HTML5 Changes 6/OCT/2016-->
-                        <button class="BTNicon" id="btnMenuSearch" onclick="fnQuickSearch();" onkeydown="return handleActionKeys(this, event)" title="Menu Search" onfocus="this.className='BTNiconH'" onblur="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onmouseout="this.className='BTNicon'"><span class="ICOgo">
-                        <span class="LBLinv">Go</span></span></button>
-                    </span>
-                </span>
-            </div>
-              <div style=" background-color: #f9eff0;" id="collapsedMenuHeader">
-              <h2 class="SPNvtabH" id="vTab_HeadingTop" tabindex="0" accesskey="3" style="padding-bottom:0px;" title="Menu">Menu</h2><!--Fix for 21312734-->
-              <span class="DashDIVnav1" style="padding:0px;margin: 10px;border-bottom: none;clear:none;height:24px;">
-            <button id="maximizer" class="BTNicon" onmouseout="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onblur="this.className='BTNicon'" onfocus="this.className='BTNiconH'" onkeydown="return handleActionKeys(this, event)" title="Collapse Menu" menu="" onclick="showHideVtab(event)"><!--Fix for 21312632 -->
-              <span class="ICObrwMaximizer" style="margin-top: 3px">
-                <span class="LBLinv">Collapse Menu</span>
-              </span>
-            </button> 
-            </span></div> 
-            </div>
-                    
-        <div id="vtab" style="display: none; height: 590px; width: 210.68px;">
-            <div class="DIVvtabP" id="idAppBrw" style="display:block">
-                <div class="tabcontent" id="vTabCN_EXPLORE" style="display: block; width: 100%; height: 580px;"></div>
-                <div class="tabcontent" id="vTabCN_CENTRAL_PROCESS" style="display: none; width: 100%; height: 619px;"></div><!--HTML5 Changes 6/OCT/2016--><!--HTML5 Changes 14/NOV/2016-->
-            </div>
-        </div>
-        </div>
-        <div id="dashboard" class="dashbg" style="position: relative; height: 619px; width: 918px; margin-left: 2px;">
-            <div id="vTabDB_DASHBOARD" style="height: 619px;"><!--HTML5 Changes End-->
-                <div id="DIVTabContentDBoardHome" class="DIVTwoColLyt" style="height:0px;"></div>
-                <div id="DIVTabContentDBoardMessages" class="DIVThreeColLyt" style="display:none;height:0px"></div>
-                <div id="DIVTabContentDBoardNextGenUI" class="DIVThreeColLyt" style="display:none;height:0px"></div>
-                <div id="DIVTabContentDBoardCustomer" title="Customer" onkeydown="handleCustQueryKeyDownEvents(event)" class="DIVThreeColLyt" style="display:none;height:0px">
-                  	<div id="hTab_DBoardCustomer" class="DBoardHeadDiv">
-					<!---->
-                   <!-- <div id="vtabMinCust">
-                        <span class="DashDIVnav1" style="padding:0px;">
-                        
-                        <button id="minimizerCust" class="BTNicon"  accesskey="2" onmouseout="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onblur="this.className='BTNicon'" onfocus="this.className='BTNiconH'" onkeydown="return handleActionKeys(this, event)" title=Collapse Menu onclick="showHideVtab_Cust()">
-                          <span class="ICObrwMaximizer">
-                            <span class="LBLinv">Expand left menu</span>
-                          </span>
-                        </button> 
-                        </span>
-                    </div>-->
-                   <!-- -->		
-                    <ul id="tabListCust">
-                    <li><a id="CustomerSearch" tabindex="0" objclicked="true" onkeydown="handleTabKeysCust(this, event);return handleTabKeys(this,event)" onclick="fnToggleDisplay('CustomerSearch');">
-                      <span class="DBoardHeadDivSpanDeSel">Customer Details
-                      </span>
-                      </a></li>
-                    </ul>
-                    </div>
-                    <div id="hTabCN_Customer" style="overflow-x:hidden; overflow-y:auto;">
-						
-                      <div id="ContentCustomerSearch">
-                        <div id="testwin_cust" style="visibility:hidden;"></div>
-                      </div>
-					
-                    </div>
-                </div>
-				
-                
-				
-                <div id="DIVTabContentDBoardTasks" class="DIVThreeColLyt" style="display:none;height:0px"></div> 
-                <div id="DIVTabContentDBoardMyDashBoard" class="DIVThreeColLyt" style="display:none;height:0px"></div>
-            </div>
-        </div>
-        <div id="MenuSearchDiv" class="dashbg"><!--HTML5 Changes-->
-<!--<div  id="MenuSearchResultDiv" >--><!--HTML5 Changes-->
-                <h2 id="MenuSearchHeaderDiv" class="WNDtitlebar"> 
-                
-                    <div class="WNDbuttons">
-                    
-                        <a class="WNDcls" accesskey="7" href="#" onblur="this.className='WNDcls'" onmouseover="this.className='WNDclsH'" onfocus="this.className='WNDclsH'" onmouseout="this.className='WNDcls'" title="Close" onclick="fnExitSearch();" onkeydown="return handleScrObj(event);">
-
-                            <span class="LBLinv">Close</span>
-                        </a>
-                    </div>
-                    <span id="displaySearchTitleTxt">Displaying Search Results for:</span>
-                    <span id="displaySearchTitle"></span>                           
-                   
-                </h2>  
-                <div id="resultDiv">
-					
-				</div>
-				<div id="pageDiv"> </div>
-				<div id="menuSearchFooter" class="DIVAudit">
-				
-					<input type="button" id="BTN_MENU_SEARCH_EXIT" name="BTN_MENU_SEARCH_EXIT" value="Exit" class="BTNfooter" onclick="fnExitSearch();" onkeydown="return handleScrObj(this,event);" onmouseover="this.className='BTNfooterH'" onblur="this.className='BTNfooter'" onfocus="this.className='BTNfooterH'" onmouseout="this.className='BTNfooter'" style="">
-					
-				</div>
-            <!--</div>--><!--HTML5 Changes-->
-        </div>
-        <div id="IFlauncher" style="width: 1px; height: 0px; z-index: 2; top: 79px; left: 0px;"></div>
-        <div id="taskbar" style="width: 918px;">
-          <div id="MinwindL">
-            <button id="ml" style="visibility:hidden" onclick="moveLeft()" class="BTNicon" onmouseout="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onblur="this.className='BTNicon'" onfocus="this.className='BTNiconH'">
-              <span class="ICOprevious"><span class="LBLinv">Show previous</span></span>
-            </button>
-          </div>
-          <div id="MinwindC" style="width: 878px;"><ul id="MINwinds"></ul></div>
-          <div id="MinwindR">
-            <button id="mr" style="visibility:hidden" onclick="moveRight()" class="BTNicon" onmouseout="this.className='BTNicon'" onmouseover="this.className='BTNiconH'" onblur="this.className='BTNicon'" onfocus="this.className='BTNiconH'">
-              <span class="ICOnext"><span class="LBLinv">Show next</span></span>
-            </button>
-          </div>
-        </div>
-        <div id="debugWindowDIV" style="width:1px ;height:0px;">
-        </div>    
-        <div id="masker" class="masker" style="display: block; height: 0px; width: 0px;" tabindex="-1">
-            <div id="Div_AlertWin" class="showPopUp" onclose="fnCloseAlertWin(event)" oncancel="fnExitAlertWin(event)" style="position: absolute; display: none; left: 178px; top: 240px;"><!--HTML5 Changes-->
-                <iframe id="ifr_AlertWin" class="frames" src="" allowtransparency="yes" frameborder="0" scrolling="no" title="Information Message" height="0" width="0" style="height: 244px; width: 562px;"></iframe>
-            </div>
-            <div id="Div_ChildWin" style="width:100%; height:100%">
-            </div>
-        </div>
+  <script type="application/ld+json">
+    {
+    "contactPoint": [
+        {
+            "@type": "ContactPoint",
+            "telephone": [
+                "+91 8698010101"
+            ],
+            "contactType": "Customer Support Service"
+        }
+    ],
+    "@type": "Organization",
+    "name": "Bajaj Finserv",
+    "logo": "https://cms-assets.bajajfinserv.in/is/image/bajajfinance/bfl-logo-desktop-v6?scl=1&fmt=png-alpha",
+    "alternateName": "Bajaj Finance",
+    "@context": "https://schema.org",
+    "url": "https://www.bajajfinserv.in",
+    "sameAs": [
+        "https://www.facebook.com/bajajfinserv",
+        "https://www.linkedin.com/company/bajaj-finserv-lending",
+        "https://x.com/Bajaj_Finserv",
+        "https://www.youtube.com/c/bajajfinserv"
+    ]
+  }
+    </script>
+     <!-- for SEO Schema type website -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Bajaj Finserv",
+      "alternateName": "Bajaj Finance",
+      "url": "https://www.bajajfinserv.in",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://www.bajajfinserv.in/search?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
+<!-- Service Schema (JSON-LD) for SEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Service",
+    "name": "Loans, Cards, Insurance, Investments, Payments",
+    "provider": {
+      "@type": "Organization",
+      "name": "Bajaj Finserv",
+      "url": "https://www.bajajfinserv.in"
+    },
+    "areaServed": "IN",
+    "serviceType": "Financial Services",
+    "url": "https://www.bajajfinserv.in",
+    "description": "Bajaj Finserv offers loans, cards, insurance, investments, payments and more."
+  }
+  </script>
  
-            <div id="Div_ReminderAlertWin" style="position:absolute;display:none">
-                <iframe id="ifr_ReminderAlertWin" class="frames" src="" allowtransparency="yes" frameborder="0" scrolling="no"></iframe>
-            </div> 
-            
-        <div id="screenSavermasker" class="masker" style="display:none" tabindex="-1">
-         
-            <div id="screenSaverPwdDIV" class="WNDcontainerModal" style="display:none;" onkeydown="return fnHandleScreenBtn(event)">
-                <div onmousedown="startDrag(event)" id="wndtitle" class="WNDtitlebar"><!--static header change -->
-                    <b class="BTNicon"><span class="ICOalert2"></span></b>	
-                    <h1 class="WNDtitletxt">Information Message</h1>            	
-                </div>
-                <div id="wndwidth" class="WNDcontentmodal">
-                    <div class="DIVtblbox1outer2">
-                      <!-- static header change start-->
-                    <div id="screensavertblHeadercontainer" class="DIVtblbox2 DIVTblHeader">
-                      <table width="100%" cellspacing="0" cellpadding="0" border="0" summary="Alert" class="TBLtwoH" id="SCREEN_SAVER_TBL_HEADER">
-                            <tbody>
-                               <tr>
-                                 <td scope="col" class="THSinglerow"><span class="SPNtbltwoH">Information Message</span></td>
-                               </tr>
-                             </tbody>
-                        </table>
-                    </div>
-                        <div class="DIVtblbox2" id="screensavertblcontainer">
-                            <table width="100%" cellspacing="0" cellpadding="0" border="0" summary="Alert" class="TBLtwo" id="SCREEN_SAVER_TBL">
-                               <tbody id="cloneMsg">                                           
-                                <tr id="alertMsg">
-                                    <td style="display:block" scope="row" id="alertMsgI"><em title="Information Message" class="BTNicon"><span tabindex="0" class="ICOAlert_I"></span></em><span class="SPNtbltwoC">Enter password to unlock the application</span>
-                                    </td>
-                                </tr>
-                                <tr id="wrongAlertMsg" style="display:none">
-                                </tr>
-                                </tbody>
-                            </table>
-                            <div class="WNDcontent" style="clear:both;width:100%;height:40%;">
-                            </div><!-- 1203 OHGHAG fix removed ID -->
-                        </div>
-                    </div>
-                    <div class="WNDfootermodal">
-                        <div class="WNDfbuttons">
-                            <table width="99%" cellspacing="0" cellpadding="0" border="0" id="TBLPageTAB_FOOTER" role="presentation">
-                                <tbody>
-                                    <tr>
-                                        <td width="52%" valign="top">
-                                            <div id="pwdDiv" class="SPNtbltwoC">Password&nbsp;&nbsp;
-                                                <input type="password" id="enteredPwd" onpaste="return false;" onkeydown="return fnhandleSubScrBtn(event)" tabindex="1" size="25" maxlength="21" style="">
-                                            </div>
-                                        </td>
-                                        <td width="98%" valign="top">
-                                            <input type="button" class="BTNfooter" name="Ok" onclick="fnverifyScreenSaverPwd(event)" onkeydown="return fnhandleSubScrBtn(event)" onmouseout="this.className='BTNfooter'" onmouseover="this.className='BTNfooterH'" onfocus="this.className='BTNfooterH'" id="BTN_OK" value="Ok" onblur="this.className='BTNfooter'" style="">
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>    
-        
-    </div>
-	<!-- 9NT1606_12_2_RETRO_12_0_3_21182929 changes start -->
-    <div id="timeOutAlertDiv" class="WNDcontainerModal frames" style="display:none">
-            <div style="width: 560px;" class="WNDtitlebar" id="timeOutErrWndtitle" onmousedown="startDrag(event)">
-                <b class="BTNicon"><span class="ICOalert2"></span></b>	
-                <h1 class="WNDtitletxt">Error Message</h1>            	
-            </div>
-            <div class="WNDcontentmodal" id="timeOutErrWndwidth">
-            <div class="DIVtblbox1outer2">
-                    <div id="tbl-container" class="DIVtblbox2">
-                          <table id="ERRTBL" class="TBLtwo" border="0" cellspacing="0" cellpadding="0" width="100%" summary="Alert">
-                                    <thead>
-                                       
-                                        <tr><th width="85%" scope="col"><span class="SPNtbltwoH" tabindex="0">Error Description</span></th>
-                                        <th class="THLast" width="15%" scope="col"><span class="SPNtbltwoH" tabindex="0">Error Code</span></th></tr>
-                                    </thead>
-                                    <tbody>                                           
-                                    </tbody>
-                            </table>
-                    </div>        
-              </div>
-                <div class="WNDfootermodal">
-                    <div class="WNDfbuttons">
-                        <table role="presentation" width="99%" border="0" cellspacing="0" cellpadding="0" id="TBLPageTAB_FOOTER">
-                             <tbody>
-                                 <tr>
-                                   <td valign="top" width="98%">
-                                   </td><td style="padding-left:10px" nowrap="nowrap">
-                                  <input class="BTNfooter" onblur="this.className='BTNfooter'" value="Ok" title="Ok" id="TIMEOUT_BTN_OK" onfocus="this.className='BTNfooterH'" onmouseover="this.className='BTNfooterH'" onmouseout="this.className='BTNfooter'" onclick="closeTimeOutErrDiv(event)" name="Ok" onkeydown="fnhandleSubScrBtn(event);" type="button" style=""><!--9NT1606_12_2_RETRO_12_0_3_23656268 changes-->
-                                 </td>
-                                 </tr>
-                             </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-<!-- Biometric Changes Start-->
-       
-    <div id="PlatoFrameDiv" style="display:none" name="PlatoFrameDiv"></div>
-              <!-- Biometric Changes End-->
-         <!-- 9NT1606_12_2_RETRO_12_0_3_21182929 changes end -->
-    
+  <!-- Breadcrumb Schema (JSON-LD) for SEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Home",
+        "item": "https://www.bajajfinserv.in"
+      }
+    ]
+  }
+  </script>
+  <script defer="">
+    // Settings
+    var maxAgeInMinutes = 35; // Cookie validity in minutes
+    var cookieName = "campaignCookie"; // Name of the cookie to store UTM data
+    // Default UTM values (for organic/referral fallback)
+    var utmSource = "organic_bfl";
+    var utmMedium = "bfl";
+    var utmCampaign = "NA";
+    var utmKeyword = "NA";
+    var utmContent = "NA";
+    // List of known search engine domains to detect organic traffic
+    var searchEngines = [
+      "google.",
+      "bing.",
+      "yahoo.",
+      "duckduckgo.",
+      "baidu.",
+      "yandex.",
+      "ask.",
+      "aol.",
+      "ecosia.",
+      "naver.",
+      "seznam.",
+      "startpage.",
+      "qwant.",
+    ];
+    // Helper: Get cookie value by name
+    function getCookieValue(name) {
+      var decodedCookie = decodeURIComponent(document.cookie);
+      var cookieArray = decodedCookie.split(";");
+      for (var i = 0; i < cookieArray.length; i++) {
+        var cookie = cookieArray[i];
+        while (cookie.charAt(0) === " ") {
+          cookie = cookie.substring(1);
+        }
+        if (cookie.indexOf(name + "=") === 0) {
+          return cookie.substring(name.length + 1);
+        }
+      }
+      return false;
+    }
+    // Helper: Parse all URL parameters into an object
+    function getAllUrlParams(url) {
+      var queryString = url.split("?")[1] || "";
+      var params = queryString.split("&");
+      var allParams = {};
+      for (var i = 0; i < params.length; i++) {
+        var pair = params[i].split("=");
+        var key = decodeURIComponent(pair[0]);
+        var value = decodeURIComponent(pair[1] || "");
+        if (key) {
+          if (allParams[key]) {
+            if (
+              Object.prototype.toString.call(allParams[key]) === "[object Array]"
+            ) {
+              allParams[key].push(value);
+            } else {
+              allParams[key] = [allParams[key], value];
+            }
+          } else {
+            allParams[key] = value;
+          }
+        }
+      }
+      return allParams;
+    }
 
-</body></html>
+    // Helper: Create or overwrite UTM cookie
+    function createUTMCookie(
+      utmSource,
+      utmMedium,
+      utmCampaign,
+      utmKeyword,
+      utmContent
+    ) {
+      var utmData = {
+        utm_source: utmSource,
+        utm_medium: utmMedium,
+        utm_campaign: utmCampaign,
+        utm_keyword: utmKeyword,
+        utm_content: utmContent,
+      };
+      var cookieValue = JSON.stringify(utmData);
+      var expiryDate = new Date(
+        new Date().getTime() + maxAgeInMinutes * 60000
+      ).toUTCString();
+      document.cookie =
+        cookieName +
+        "=" +
+        cookieValue +
+        "; path=/; expires=" +
+        expiryDate +
+        "; SameSite=Strict";
+    }
+    // Main function to detect and store UTM/referral info
+    function fetch_utm() {
+      var params = getAllUrlParams(document.URL);
+      // Step 1: UTM parameters found in URL
+      if (params.utm_source) {
+        utmSource = params.utm_source;
+        if (params.utm_medium) utmMedium = params.utm_medium;
+        if (params.utm_campaign) utmCampaign = params.utm_campaign;
+        if (params.utm_keyword) utmKeyword = params.utm_keyword;
+        if (params.utm_content) utmContent = params.utm_content;
+        createUTMCookie(utmSource, utmMedium, utmCampaign, utmKeyword, utmContent);
+        return;
+      }
+      // Step 2: Check if referrer is from a known search engine
+      var referrer = document.referrer;
+      var isOrganicSearch = false;
+      for (var i = 0; i < searchEngines.length; i++) {
+        if (referrer.indexOf(searchEngines[i]) > -1) {
+          isOrganicSearch = true;
+          break;
+        }
+      }
+      if (isOrganicSearch) {
+        createUTMCookie(utmSource, utmMedium, utmCampaign, utmKeyword, utmContent);
+        return;
+      }
+      // Step 3: Reuse values from existing cookie if available
+      var existingCookie = getCookieValue(cookieName);
+      if (existingCookie) {
+        var parsed;
+        try {
+          parsed = JSON.parse(existingCookie);
+        } catch (e) {
+          parsed = {};
+        }
+        createUTMCookie(
+          parsed.utm_source || utmSource,
+          parsed.utm_medium || utmMedium,
+          parsed.utm_campaign || utmCampaign,
+          parsed.utm_keyword || utmKeyword,
+          parsed.utm_content || utmContent
+        );
+        return;
+      }
+      // Step 4: Use document.referrer as fallback source
+      if (document.referrer && document.referrer !== "") {
+        var hostname;
+        try {
+          hostname = document.createElement("a");
+          hostname.href = document.referrer;
+          utmSource = hostname.hostname;
+        } catch (e) {
+          utmSource = document.referrer;
+        }
+        utmMedium = "referrer";
+        createUTMCookie(utmSource, utmMedium, utmCampaign, utmKeyword, utmContent);
+        return;
+      }
+      // Step 5: Default fallback values
+      createUTMCookie(utmSource, utmMedium, utmCampaign, utmKeyword, utmContent);
+    }
+    // Execute
+    fetch_utm();
+    // Updated Date - 30-May'25
+
+  </script>
+
+<!-- Google Tag Manager -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+    'gtm.start': new Date().getTime(),
+    event: 'gtm.js'
+    });
+    window.pdata = window.pdata || [];
+  </script>
+  <!-- End Google Tag Manager -->
+
+  <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-element-bundle.min.js" defer=""></script>
+
+<style>:root{--swiper-theme-color:#007aff}:root{--swiper-navigation-size:44px}html{--mat-option-selected-state-label-text-color:#3f51b5;--mat-option-label-text-color:rgba(0, 0, 0, .87);--mat-option-hover-state-layer-color:rgba(0, 0, 0, .04);--mat-option-focus-state-layer-color:rgba(0, 0, 0, .04);--mat-option-selected-state-layer-color:rgba(0, 0, 0, .04)}html{--mat-optgroup-label-text-color:rgba(0, 0, 0, .87)}html{--mat-option-label-text-font:Roboto, sans-serif;--mat-option-label-text-line-height:24px;--mat-option-label-text-size:16px;--mat-option-label-text-tracking:.03125em;--mat-option-label-text-weight:400}html{--mat-optgroup-label-text-font:Roboto, sans-serif;--mat-optgroup-label-text-line-height:24px;--mat-optgroup-label-text-size:16px;--mat-optgroup-label-text-tracking:.03125em;--mat-optgroup-label-text-weight:400}html{--mdc-filled-text-field-caret-color:#3f51b5;--mdc-filled-text-field-focus-active-indicator-color:#3f51b5;--mdc-filled-text-field-focus-label-text-color:rgba(63, 81, 181, .87);--mdc-filled-text-field-container-color:whitesmoke;--mdc-filled-text-field-disabled-container-color:#fafafa;--mdc-filled-text-field-label-text-color:rgba(0, 0, 0, .6);--mdc-filled-text-field-disabled-label-text-color:rgba(0, 0, 0, .38);--mdc-filled-text-field-input-text-color:rgba(0, 0, 0, .87);--mdc-filled-text-field-disabled-input-text-color:rgba(0, 0, 0, .38);--mdc-filled-text-field-input-text-placeholder-color:rgba(0, 0, 0, .6);--mdc-filled-text-field-error-focus-label-text-color:#f44336;--mdc-filled-text-field-error-label-text-color:#f44336;--mdc-filled-text-field-error-caret-color:#f44336;--mdc-filled-text-field-active-indicator-color:rgba(0, 0, 0, .42);--mdc-filled-text-field-disabled-active-indicator-color:rgba(0, 0, 0, .06);--mdc-filled-text-field-hover-active-indicator-color:rgba(0, 0, 0, .87);--mdc-filled-text-field-error-active-indicator-color:#f44336;--mdc-filled-text-field-error-focus-active-indicator-color:#f44336;--mdc-filled-text-field-error-hover-active-indicator-color:#f44336;--mdc-outlined-text-field-caret-color:#3f51b5;--mdc-outlined-text-field-focus-outline-color:#3f51b5;--mdc-outlined-text-field-focus-label-text-color:rgba(63, 81, 181, .87);--mdc-outlined-text-field-label-text-color:rgba(0, 0, 0, .6);--mdc-outlined-text-field-disabled-label-text-color:rgba(0, 0, 0, .38);--mdc-outlined-text-field-input-text-color:rgba(0, 0, 0, .87);--mdc-outlined-text-field-disabled-input-text-color:rgba(0, 0, 0, .38);--mdc-outlined-text-field-input-text-placeholder-color:rgba(0, 0, 0, .6);--mdc-outlined-text-field-error-caret-color:#f44336;--mdc-outlined-text-field-error-focus-label-text-color:#f44336;--mdc-outlined-text-field-error-label-text-color:#f44336;--mdc-outlined-text-field-outline-color:rgba(0, 0, 0, .38);--mdc-outlined-text-field-disabled-outline-color:rgba(0, 0, 0, .06);--mdc-outlined-text-field-hover-outline-color:rgba(0, 0, 0, .87);--mdc-outlined-text-field-error-focus-outline-color:#f44336;--mdc-outlined-text-field-error-hover-outline-color:#f44336;--mdc-outlined-text-field-error-outline-color:#f44336;--mat-form-field-disabled-input-text-placeholder-color:rgba(0, 0, 0, .38)}html{--mdc-filled-text-field-label-text-font:Roboto, sans-serif;--mdc-filled-text-field-label-text-size:16px;--mdc-filled-text-field-label-text-tracking:.03125em;--mdc-filled-text-field-label-text-weight:400;--mdc-outlined-text-field-label-text-font:Roboto, sans-serif;--mdc-outlined-text-field-label-text-size:16px;--mdc-outlined-text-field-label-text-tracking:.03125em;--mdc-outlined-text-field-label-text-weight:400;--mat-form-field-container-text-font:Roboto, sans-serif;--mat-form-field-container-text-line-height:24px;--mat-form-field-container-text-size:16px;--mat-form-field-container-text-tracking:.03125em;--mat-form-field-container-text-weight:400;--mat-form-field-outlined-label-text-populated-size:16px;--mat-form-field-subscript-text-font:Roboto, sans-serif;--mat-form-field-subscript-text-line-height:20px;--mat-form-field-subscript-text-size:12px;--mat-form-field-subscript-text-tracking:.0333333333em;--mat-form-field-subscript-text-weight:400}html{--mat-select-panel-background-color:white;--mat-select-enabled-trigger-text-color:rgba(0, 0, 0, .87);--mat-select-disabled-trigger-text-color:rgba(0, 0, 0, .38);--mat-select-placeholder-text-color:rgba(0, 0, 0, .6);--mat-select-enabled-arrow-color:rgba(0, 0, 0, .54);--mat-select-disabled-arrow-color:rgba(0, 0, 0, .38);--mat-select-focused-arrow-color:rgba(63, 81, 181, .87);--mat-select-invalid-arrow-color:rgba(244, 67, 54, .87)}html{--mat-select-trigger-text-font:Roboto, sans-serif;--mat-select-trigger-text-line-height:24px;--mat-select-trigger-text-size:16px;--mat-select-trigger-text-tracking:.03125em;--mat-select-trigger-text-weight:400}html{--mat-autocomplete-background-color:white}html{--mat-menu-item-label-text-color:rgba(0, 0, 0, .87);--mat-menu-item-icon-color:rgba(0, 0, 0, .87);--mat-menu-item-hover-state-layer-color:rgba(0, 0, 0, .04);--mat-menu-item-focus-state-layer-color:rgba(0, 0, 0, .04);--mat-menu-container-color:white}html{--mat-menu-item-label-text-font:Roboto, sans-serif;--mat-menu-item-label-text-size:16px;--mat-menu-item-label-text-tracking:.03125em;--mat-menu-item-label-text-line-height:24px;--mat-menu-item-label-text-weight:400}html{--mat-paginator-container-text-color:rgba(0, 0, 0, .87);--mat-paginator-container-background-color:white;--mat-paginator-enabled-icon-color:rgba(0, 0, 0, .54);--mat-paginator-disabled-icon-color:rgba(0, 0, 0, .12)}html{--mat-paginator-container-size:56px}html{--mat-paginator-container-text-font:Roboto, sans-serif;--mat-paginator-container-text-line-height:20px;--mat-paginator-container-text-size:12px;--mat-paginator-container-text-tracking:.0333333333em;--mat-paginator-container-text-weight:400;--mat-paginator-select-trigger-text-size:12px}html{--mdc-checkbox-disabled-selected-icon-color:rgba(0, 0, 0, .38);--mdc-checkbox-disabled-unselected-icon-color:rgba(0, 0, 0, .38);--mdc-checkbox-selected-checkmark-color:#fff;--mdc-checkbox-selected-focus-icon-color:#ff4081;--mdc-checkbox-selected-hover-icon-color:#ff4081;--mdc-checkbox-selected-icon-color:#ff4081;--mdc-checkbox-selected-pressed-icon-color:#ff4081;--mdc-checkbox-unselected-focus-icon-color:#212121;--mdc-checkbox-unselected-hover-icon-color:#212121;--mdc-checkbox-unselected-icon-color:rgba(0, 0, 0, .54);--mdc-checkbox-unselected-pressed-icon-color:rgba(0, 0, 0, .54);--mdc-checkbox-selected-focus-state-layer-color:#ff4081;--mdc-checkbox-selected-hover-state-layer-color:#ff4081;--mdc-checkbox-selected-pressed-state-layer-color:#ff4081;--mdc-checkbox-unselected-focus-state-layer-color:black;--mdc-checkbox-unselected-hover-state-layer-color:black;--mdc-checkbox-unselected-pressed-state-layer-color:black}html{--mdc-checkbox-state-layer-size:40px}html{--mat-table-background-color:white;--mat-table-header-headline-color:rgba(0, 0, 0, .87);--mat-table-row-item-label-text-color:rgba(0, 0, 0, .87);--mat-table-row-item-outline-color:rgba(0, 0, 0, .12)}html{--mat-table-header-container-height:56px;--mat-table-footer-container-height:52px;--mat-table-row-item-container-height:52px}html{--mat-table-header-headline-font:Roboto, sans-serif;--mat-table-header-headline-line-height:22px;--mat-table-header-headline-size:14px;--mat-table-header-headline-weight:500;--mat-table-header-headline-tracking:.0071428571em;--mat-table-row-item-label-text-font:Roboto, sans-serif;--mat-table-row-item-label-text-line-height:20px;--mat-table-row-item-label-text-size:14px;--mat-table-row-item-label-text-weight:400;--mat-table-row-item-label-text-tracking:.0178571429em;--mat-table-footer-supporting-text-font:Roboto, sans-serif;--mat-table-footer-supporting-text-line-height:20px;--mat-table-footer-supporting-text-size:14px;--mat-table-footer-supporting-text-weight:400;--mat-table-footer-supporting-text-tracking:.0178571429em}html{--mat-badge-background-color:#3f51b5;--mat-badge-text-color:white;--mat-badge-disabled-state-background-color:#b9b9b9;--mat-badge-disabled-state-text-color:rgba(0, 0, 0, .38)}html{--mat-badge-text-font:Roboto, sans-serif;--mat-badge-text-size:12px;--mat-badge-text-weight:600;--mat-badge-small-size-text-size:9px;--mat-badge-large-size-text-size:24px}html{--mat-bottom-sheet-container-text-color:rgba(0, 0, 0, .87);--mat-bottom-sheet-container-background-color:white}html{--mat-bottom-sheet-container-text-font:Roboto, sans-serif;--mat-bottom-sheet-container-text-line-height:20px;--mat-bottom-sheet-container-text-size:14px;--mat-bottom-sheet-container-text-tracking:.0178571429em;--mat-bottom-sheet-container-text-weight:400}html{--mat-legacy-button-toggle-text-color:rgba(0, 0, 0, .38);--mat-legacy-button-toggle-state-layer-color:rgba(0, 0, 0, .12);--mat-legacy-button-toggle-selected-state-text-color:rgba(0, 0, 0, .54);--mat-legacy-button-toggle-selected-state-background-color:#e0e0e0;--mat-legacy-button-toggle-disabled-state-text-color:rgba(0, 0, 0, .26);--mat-legacy-button-toggle-disabled-state-background-color:#eeeeee;--mat-legacy-button-toggle-disabled-selected-state-background-color:#bdbdbd;--mat-standard-button-toggle-text-color:rgba(0, 0, 0, .87);--mat-standard-button-toggle-background-color:white;--mat-standard-button-toggle-state-layer-color:black;--mat-standard-button-toggle-selected-state-background-color:#e0e0e0;--mat-standard-button-toggle-selected-state-text-color:rgba(0, 0, 0, .87);--mat-standard-button-toggle-disabled-state-text-color:rgba(0, 0, 0, .26);--mat-standard-button-toggle-disabled-state-background-color:white;--mat-standard-button-toggle-disabled-selected-state-text-color:rgba(0, 0, 0, .87);--mat-standard-button-toggle-disabled-selected-state-background-color:#bdbdbd;--mat-standard-button-toggle-divider-color:#e0e0e0}html{--mat-standard-button-toggle-height:48px}html{--mat-legacy-button-toggle-text-font:Roboto, sans-serif;--mat-standard-button-toggle-text-font:Roboto, sans-serif}html{--mat-datepicker-calendar-date-selected-state-text-color:white;--mat-datepicker-calendar-date-selected-state-background-color:#3f51b5;--mat-datepicker-calendar-date-selected-disabled-state-background-color:rgba(63, 81, 181, .4);--mat-datepicker-calendar-date-today-selected-state-outline-color:white;--mat-datepicker-calendar-date-focus-state-background-color:rgba(63, 81, 181, .3);--mat-datepicker-calendar-date-hover-state-background-color:rgba(63, 81, 181, .3);--mat-datepicker-toggle-active-state-icon-color:#3f51b5;--mat-datepicker-calendar-date-in-range-state-background-color:rgba(63, 81, 181, .2);--mat-datepicker-calendar-date-in-comparison-range-state-background-color:rgba(249, 171, 0, .2);--mat-datepicker-calendar-date-in-overlap-range-state-background-color:#a8dab5;--mat-datepicker-calendar-date-in-overlap-range-selected-state-background-color:#46a35e;--mat-datepicker-toggle-icon-color:rgba(0, 0, 0, .54);--mat-datepicker-calendar-body-label-text-color:rgba(0, 0, 0, .54);--mat-datepicker-calendar-period-button-icon-color:rgba(0, 0, 0, .54);--mat-datepicker-calendar-navigation-button-icon-color:rgba(0, 0, 0, .54);--mat-datepicker-calendar-header-divider-color:rgba(0, 0, 0, .12);--mat-datepicker-calendar-header-text-color:rgba(0, 0, 0, .54);--mat-datepicker-calendar-date-today-outline-color:rgba(0, 0, 0, .38);--mat-datepicker-calendar-date-today-disabled-state-outline-color:rgba(0, 0, 0, .18);--mat-datepicker-calendar-date-text-color:rgba(0, 0, 0, .87);--mat-datepicker-calendar-date-outline-color:transparent;--mat-datepicker-calendar-date-disabled-state-text-color:rgba(0, 0, 0, .38);--mat-datepicker-calendar-date-preview-state-outline-color:rgba(0, 0, 0, .24);--mat-datepicker-range-input-separator-color:rgba(0, 0, 0, .87);--mat-datepicker-range-input-disabled-state-separator-color:rgba(0, 0, 0, .38);--mat-datepicker-range-input-disabled-state-text-color:rgba(0, 0, 0, .38);--mat-datepicker-calendar-container-background-color:white;--mat-datepicker-calendar-container-text-color:rgba(0, 0, 0, .87)}html{--mat-datepicker-calendar-text-font:Roboto, sans-serif;--mat-datepicker-calendar-text-size:13px;--mat-datepicker-calendar-body-label-text-size:14px;--mat-datepicker-calendar-body-label-text-weight:500;--mat-datepicker-calendar-period-button-text-size:14px;--mat-datepicker-calendar-period-button-text-weight:500;--mat-datepicker-calendar-header-text-size:11px;--mat-datepicker-calendar-header-text-weight:400}html{--mat-divider-color:rgba(0, 0, 0, .12)}html{--mat-expansion-container-background-color:white;--mat-expansion-container-text-color:rgba(0, 0, 0, .87);--mat-expansion-actions-divider-color:rgba(0, 0, 0, .12);--mat-expansion-header-hover-state-layer-color:rgba(0, 0, 0, .04);--mat-expansion-header-focus-state-layer-color:rgba(0, 0, 0, .04);--mat-expansion-header-disabled-state-text-color:rgba(0, 0, 0, .26);--mat-expansion-header-text-color:rgba(0, 0, 0, .87);--mat-expansion-header-description-color:rgba(0, 0, 0, .54);--mat-expansion-header-indicator-color:rgba(0, 0, 0, .54)}html{--mat-expansion-header-collapsed-state-height:48px;--mat-expansion-header-expanded-state-height:64px}html{--mat-expansion-header-text-font:Roboto, sans-serif;--mat-expansion-header-text-size:14px;--mat-expansion-header-text-weight:500;--mat-expansion-header-text-line-height:inherit;--mat-expansion-header-text-tracking:inherit;--mat-expansion-container-text-font:Roboto, sans-serif;--mat-expansion-container-text-line-height:20px;--mat-expansion-container-text-size:14px;--mat-expansion-container-text-tracking:.0178571429em;--mat-expansion-container-text-weight:400}html{--mat-grid-list-tile-header-primary-text-size:14px;--mat-grid-list-tile-header-secondary-text-size:12px;--mat-grid-list-tile-footer-primary-text-size:14px;--mat-grid-list-tile-footer-secondary-text-size:12px}html{--mat-icon-color:inherit}html{--mat-sidenav-container-divider-color:rgba(0, 0, 0, .12);--mat-sidenav-container-background-color:white;--mat-sidenav-container-text-color:rgba(0, 0, 0, .87);--mat-sidenav-content-background-color:#fafafa;--mat-sidenav-content-text-color:rgba(0, 0, 0, .87);--mat-sidenav-scrim-color:rgba(0, 0, 0, .6)}html{--mat-stepper-header-icon-foreground-color:white;--mat-stepper-header-selected-state-icon-background-color:#3f51b5;--mat-stepper-header-selected-state-icon-foreground-color:white;--mat-stepper-header-done-state-icon-background-color:#3f51b5;--mat-stepper-header-done-state-icon-foreground-color:white;--mat-stepper-header-edit-state-icon-background-color:#3f51b5;--mat-stepper-header-edit-state-icon-foreground-color:white;--mat-stepper-container-color:white;--mat-stepper-line-color:rgba(0, 0, 0, .12);--mat-stepper-header-hover-state-layer-color:rgba(0, 0, 0, .04);--mat-stepper-header-focus-state-layer-color:rgba(0, 0, 0, .04);--mat-stepper-header-label-text-color:rgba(0, 0, 0, .54);--mat-stepper-header-optional-label-text-color:rgba(0, 0, 0, .54);--mat-stepper-header-selected-state-label-text-color:rgba(0, 0, 0, .87);--mat-stepper-header-error-state-label-text-color:#f44336;--mat-stepper-header-icon-background-color:rgba(0, 0, 0, .54);--mat-stepper-header-error-state-icon-foreground-color:#f44336;--mat-stepper-header-error-state-icon-background-color:transparent}html{--mat-stepper-header-height:72px}html{--mat-stepper-container-text-font:Roboto, sans-serif;--mat-stepper-header-label-text-font:Roboto, sans-serif;--mat-stepper-header-label-text-size:14px;--mat-stepper-header-label-text-weight:400;--mat-stepper-header-error-state-label-text-size:16px;--mat-stepper-header-selected-state-label-text-size:16px;--mat-stepper-header-selected-state-label-text-weight:400}html{--mat-toolbar-container-background-color:whitesmoke;--mat-toolbar-container-text-color:rgba(0, 0, 0, .87)}html{--mat-toolbar-standard-height:64px;--mat-toolbar-mobile-height:56px}html{--mat-toolbar-title-text-font:Roboto, sans-serif;--mat-toolbar-title-text-line-height:32px;--mat-toolbar-title-text-size:20px;--mat-toolbar-title-text-tracking:.0125em;--mat-toolbar-title-text-weight:500}body{background:#e5eaf7;font-family:Rubik-Regular,sans-serif;color:#666;margin:0;position:relative}*{margin:0;padding:0;outline:none!important;-webkit-overflow-scrolling:touch;box-sizing:border-box;-webkit-touch-callout:none;-webkit-user-select:initial;user-select:none}h1{margin:0;font-weight:400}*:focus{outline:none}html{font-size:10px}body{background:#e5eaf7;font-family:var(--font-family-regular);margin:0}*{outline:none!important;-webkit-overflow-scrolling:touch;box-sizing:border-box;-webkit-user-select:initial;user-select:none}@media (min-width: 1025px){body{cursor:default!important}}:root{--font-family-regular:Mukta-Regular, sans-serif;--font-family-medium:Mukta-Medium, sans-serif;--font-family-semibold:Mukta-SemiBold, sans-serif;--font-family-bold:Mukta-Bold, sans-serif}:root body h1{font-family:var(--font-family-medium)}:root[lang=en] body h1{font-family:var(--font-family-medium)}@charset "UTF-8";:root{--bs-blue:#0d6efd;--bs-indigo:#6610f2;--bs-purple:#6f42c1;--bs-pink:#d63384;--bs-red:#dc3545;--bs-orange:#fd7e14;--bs-yellow:#ffc107;--bs-green:#198754;--bs-teal:#20c997;--bs-cyan:#0dcaf0;--bs-white:#fff;--bs-gray:#6c757d;--bs-gray-dark:#343a40;--bs-primary:#0d6efd;--bs-secondary:#6c757d;--bs-success:#198754;--bs-info:#0dcaf0;--bs-warning:#ffc107;--bs-danger:#dc3545;--bs-light:#f8f9fa;--bs-dark:#212529;--bs-font-sans-serif:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";--bs-font-monospace:SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;--bs-gradient:linear-gradient(180deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, 0))}*,:after,:before{box-sizing:border-box}@media (prefers-reduced-motion:no-preference){:root{scroll-behavior:smooth}}body{margin:0;font-family:var(--bs-font-sans-serif);font-size:1rem;font-weight:400;line-height:1.5;color:#212529;background-color:#fff;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}h1{margin-top:0;margin-bottom:.5rem;font-weight:500;line-height:1.2}h1{font-size:calc(1.375rem + 1.5vw)}@media (min-width:1200px){h1{font-size:2.5rem}}</style><link rel="stylesheet" href="styles.css" media="all" onload="this.media='all'"><noscript><link rel="stylesheet" href="styles.css"></noscript>
+<script>(window.BOOMR_mq=window.BOOMR_mq||[]).push(["addVar",{"rua.upush":"false","rua.cpush":"false","rua.upre":"false","rua.cpre":"false","rua.uprl":"false","rua.cprl":"false","rua.cprf":"false","rua.trans":"SJ-8de72769-e105-433c-996f-b53b346190e2","rua.cook":"true","rua.ims":"false","rua.ufprl":"false","rua.cfprl":"false","rua.isuxp":"false","rua.texp":"norulematch","rua.ceh":"false","rua.ueh":"false","rua.ieh.st":"0"}]);</script>
+                              <script>!function(e){var n="https://s.go-mpulse.net/boomerang/";if("False"=="True")e.BOOMR_config=e.BOOMR_config||{},e.BOOMR_config.PageParams=e.BOOMR_config.PageParams||{},e.BOOMR_config.PageParams.pci=!0,n="https://s2.go-mpulse.net/boomerang/";if(window.BOOMR_API_key="LFLGP-CFHH6-WRWCP-BJ7WS-SC98V",function(){function e(){if(!o){var e=document.createElement("script");e.id="boomr-scr-as",e.src=window.BOOMR.url,e.async=!0,i.parentNode.appendChild(e),o=!0}}function t(e){o=!0;var n,t,a,r,d=document,O=window;if(window.BOOMR.snippetMethod=e?"if":"i",t=function(e,n){var t=d.createElement("script");t.id=n||"boomr-if-as",t.src=window.BOOMR.url,BOOMR_lstart=(new Date).getTime(),e=e||d.body,e.appendChild(t)},!window.addEventListener&&window.attachEvent&&navigator.userAgent.match(/MSIE [67]\./))return window.BOOMR.snippetMethod="s",void t(i.parentNode,"boomr-async");a=document.createElement("IFRAME"),a.src="about:blank",a.title="",a.role="presentation",a.loading="eager",r=(a.frameElement||a).style,r.width=0,r.height=0,r.border=0,r.display="none",i.parentNode.appendChild(a);try{O=a.contentWindow,d=O.document.open()}catch(_){n=document.domain,a.src="javascript:var d=document.open();d.domain='"+n+"';void(0);",O=a.contentWindow,d=O.document.open()}if(n)d._boomrl=function(){this.domain=n,t()},d.write("<bo"+"dy onload='document._boomrl();'>");else if(O._boomrl=function(){t()},O.addEventListener)O.addEventListener("load",O._boomrl,!1);else if(O.attachEvent)O.attachEvent("onload",O._boomrl);d.close()}function a(e){window.BOOMR_onload=e&&e.timeStamp||(new Date).getTime()}if(!window.BOOMR||!window.BOOMR.version&&!window.BOOMR.snippetExecuted){window.BOOMR=window.BOOMR||{},window.BOOMR.snippetStart=(new Date).getTime(),window.BOOMR.snippetExecuted=!0,window.BOOMR.snippetVersion=12,window.BOOMR.url=n+"LFLGP-CFHH6-WRWCP-BJ7WS-SC98V";var i=document.currentScript||document.getElementsByTagName("script")[0],o=!1,r=document.createElement("link");if(r.relList&&"function"==typeof r.relList.supports&&r.relList.supports("preload")&&"as"in r)window.BOOMR.snippetMethod="p",r.href=window.BOOMR.url,r.rel="preload",r.as="script",r.addEventListener("load",e),r.addEventListener("error",function(){t(!0)}),setTimeout(function(){if(!o)t(!0)},3e3),BOOMR_lstart=(new Date).getTime(),i.parentNode.appendChild(r);else t(!1);if(window.addEventListener)window.addEventListener("load",a,!1);else if(window.attachEvent)window.attachEvent("onload",a)}}(),"".length>0)if(e&&"performance"in e&&e.performance&&"function"==typeof e.performance.setResourceTimingBufferSize)e.performance.setResourceTimingBufferSize();!function(){if(BOOMR=e.BOOMR||{},BOOMR.plugins=BOOMR.plugins||{},!BOOMR.plugins.AK){var n="false"=="true"?1:0,t="cookiepresent",a="m4uuudaxajhhg2mc5cyq-f-1ecf519a4-clientnsv4-s.akamaihd.net",i="false"=="true"?2:1,o={"ak.v":"39","ak.cp":"1844202","ak.ai":parseInt("524911",10),"ak.ol":"0","ak.cr":16,"ak.ipv":4,"ak.proto":"h2","ak.rid":"2cf705e4","ak.r":51447,"ak.a2":n,"ak.m":"dsca","ak.n":"essl","ak.bpcip":"103.41.74.0","ak.cport":59832,"ak.gh":"23.63.84.199","ak.quicv":"","ak.tlsv":"tls1.3","ak.0rtt":"","ak.0rtt.ed":"","ak.csrc":"-","ak.acc":"","ak.t":"1770186929","ak.ak":"hOBiQwZUYzCg5VSAfCLimQ==20Gkx2en3+Bi4Zdwkw52F17v9m6c9jkThP6dyhlMNjpCvQEGk2gfNo4LjA7JCOqAyQLuU/ZFlYmfigcELi9G9944vUmnobuinpzeAYCFe/BLt4mwOfmiCv7gW1/uDlgGu5Ky10+M7YOTBTOE69YP7ddE6Zs6xQ0uKTAExf0WrqiS3xeKefRdmzT7zNxfVzwBl6Bua8syI+kXEUUfI68iRG0b7etvYMEPvPKdlEocwAUilmqIZlPRzWgQS1RsWobe0VsyMhYb1DTMka13aXBk8ZI1nPkRDCM8sCuGw9HT7B+MTHslHu0K0aaU/bIGbTZIyWUZIzR6O51/nmwKqblJ8NQt7oqDlhJes2L2bbYsiS027OHms5B1U4FmpvPugq3Pwf4mrpZum3deWvl29GxRI63CD7KelI+St9sHra1zokg=","ak.pv":"2519","ak.dpoabenc":"","ak.tf":i};if(""!==t)o["ak.ruds"]=t;var r={i:!1,av:function(n){var t="http.initiator";if(n&&(!n[t]||"spa_hard"===n[t]))o["ak.feo"]=void 0!==e.aFeoApplied?1:0,BOOMR.addVar(o)},rv:function(){var e=["ak.bpcip","ak.cport","ak.cr","ak.csrc","ak.gh","ak.ipv","ak.m","ak.n","ak.ol","ak.proto","ak.quicv","ak.tlsv","ak.0rtt","ak.0rtt.ed","ak.r","ak.acc","ak.t","ak.tf"];BOOMR.removeVar(e)}};BOOMR.plugins.AK={akVars:o,akDNSPreFetchDomain:a,init:function(){if(!r.i){var e=BOOMR.subscribe;e("before_beacon",r.av,null,null),e("onbeacon",r.rv,null,null),r.i=!0}return this},is_complete:function(){return!0}}}}()}(window);</script><link href="https://s.go-mpulse.net/boomerang/LFLGP-CFHH6-WRWCP-BJ7WS-SC98V" rel="preload" as="script"><script src="https://pushengineweb.bajajfinserv.in/3in1web/onboarding-web/bfl-login-wc-v1.4.1.js" id="onboardingMfeScript" defer=""></script><script src="https://p11.techlab-cdn.com/e/65319_1825172515.js" crossorigin="anonymous"></script><script src="https://p11.techlab-cdn.com/e/65257_1825202430.js" crossorigin="anonymous"></script><script src="https://p11.techlab-cdn.com/e/64885_1825202492.js" crossorigin="anonymous"></script><script src="https://p11.techlab-cdn.com/e/65226_747628124.js" crossorigin="anonymous"></script><script id="boomr-scr-as" src="https://s.go-mpulse.net/boomerang/LFLGP-CFHH6-WRWCP-BJ7WS-SC98V" async=""></script><meta http-equiv="origin-trial" content="A6MWCkFp/4goXtWiSJNfo09g03RCQpXkuDZDGnlApjvSPZL4CIhvZx3xGfg6bCT4TRppCXmFXWDEkxA7DO3nZgQAAACGeyJvcmlnaW4iOiJodHRwczovL2dvLW1wdWxzZS5uZXQ6NDQzIiwiZmVhdHVyZSI6IlNvZnROYXZpZ2F0aW9uSGV1cmlzdGljcyIsImV4cGlyeSI6MTcwOTY4MzE5OSwiaXNTdWJkb21haW4iOnRydWUsImlzVGhpcmRQYXJ0eSI6dHJ1ZX0="><meta http-equiv="origin-trial" content="A2uWz2bbyoykT6h7LZQlNUdwVAFfb3IL5LU+YR1qxtW5T1dCRKjJ5/h3zur1LmuLWk0B1kyAAwyCxJzDCzNxUAQAAAB6eyJvcmlnaW4iOiJodHRwczovL2FrYW1haS5jb206NDQzIiwiZmVhdHVyZSI6IkJhY2tGb3J3YXJkQ2FjaGVOb3RSZXN0b3JlZFJlYXNvbnMiLCJleHBpcnkiOjE2OTE1MzkxOTksImlzVGhpcmRQYXJ0eSI6dHJ1ZX0="><style type="text/css"></style></head>
+
+<body>
+  <h1 style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;">
+    Bajaj Finserv
+  </h1>
+
+  <app-root></app-root>
+  <app-opt-footer></app-opt-footer>
+  <script> 
+        
+    String.prototype.replaceAll = function (a, b) { return this.replace(a, b); }
+    document.addEventListener("DOMContentLoaded", function (event) {
+      console.time('AppBoot', 'DOMContentLoaded');
+      // Your code to run since DOM is loaded and ready
+      // console.log("pwa has been load")
+      //  prompt("pwaReady")
+      // const nowD = new Date();
+      // let newDate = nowD.toLocaleString() + ':' + nowD.getMilliseconds();
+      // appLogData = appLogData + 'DOMContentLoaded  index load ' + ' ' + newDate + ' |';
+
+    var userAgent = navigator.userAgent || navigator.vendor || window.opera;
+    // If not Android, execute the prompt
+    // if (!/android/i.test(userAgent)) {
+    //   prompt("iOSStart");
+    // }
+
+
+    });
+    var newDate = new Date().toLocaleString();
+    console.log("index page dataTime" + newDate)
+  </script>
+
+
+
+ 
+  <!-- Last clicked cookie script for other modules may use cookie value -->
+
+<script src="runtime.da5d94e8.js" type="module"></script><script src="polyfills.9ae85c04.js" type="module"></script><script src="scripts.js" defer=""></script><script src="main.75ad2d34.js" type="module"></script>
+
+
+
+<div class="cdk-live-announcer-element cdk-visually-hidden" aria-atomic="true" aria-live="polite" id="cdk-live-announcer-0"></div></body><iframe id="RcaW80rhJ0tFLLPJ" tabindex="-1" height="0" width="0" style="display: none; visibility: hidden;"></iframe><div tabindex="-1" style="display: none; visibility: hidden;"></div></html>

@@ -686,6 +686,210 @@ async function scrollToElementByText(text: string): Promise<boolean> {
     }
 }
 
+/* ============== ELEMENT VERIFICATION & VALIDATION ============== */
+
+/**
+ * Verify that an element actually exists, is visible, and is in the viewport
+ * Returns detailed information about the element's state
+ */
+async function verifyElementExists(selector: string, target: string, frame: any = null): Promise<{exists: boolean; visible: boolean; inViewport: boolean; clickable: boolean; element?: any}> {
+    try {
+        const searchTarget = frame || state.page;
+        if (!searchTarget) return {exists: false, visible: false, inViewport: false, clickable: false};
+        
+        const result = await searchTarget.evaluate(({sel, searchText}) => {
+            let element = null;
+            
+            // Try selector first
+            if (sel) {
+                try {
+                    element = document.querySelector(sel);
+                } catch (e) {
+                    // Invalid selector
+                }
+            }
+            
+            // If no element from selector, search by text
+            if (!element) {
+                const allElements = document.querySelectorAll('*');
+                const searchLower = searchText.toLowerCase();
+                for (const el of Array.from(allElements)) {
+                    const text = (el.textContent || '').toLowerCase();
+                    if (text.includes(searchLower)) {
+                        element = el;
+                        break;
+                    }
+                }
+            }
+            
+            if (!element) return {exists: false, visible: false, inViewport: false, clickable: false};
+            
+            const style = window.getComputedStyle(element);
+            const rect = (element as HTMLElement).getBoundingClientRect();
+            
+            return {
+                exists: true,
+                visible: style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0',
+                inViewport: rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth,
+                clickable: !!(element.tagName === 'BUTTON' || element.tagName === 'A' || element.getAttribute('role') === 'button' || element.getAttribute('onclick')),
+                rect: {width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom}
+            };
+        }, {sel: selector, searchText: target});
+        
+        return result;
+    } catch (e: any) {
+        log(`⚠️ Verification failed: ${e.message}`);
+        return {exists: false, visible: false, inViewport: false, clickable: false};
+    }
+}
+
+/**
+ * Wait and verify that DOM changed after an action (click or fill)
+ * This confirms the action actually took effect
+ */
+async function verifyActionTookEffect(actionType: 'click' | 'fill', timeout: number = 2000): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+    
+    try {
+        // Take a snapshot of DOM before action
+        const beforeSnapshot = await state.page.evaluate(() => {
+            return {
+                url: window.location.href,
+                elementCount: document.querySelectorAll('*').length,
+                bodyText: document.body.textContent?.substring(0, 500) || ''
+            };
+        });
+        
+        // Wait for potential changes
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Check if DOM changed
+        const afterSnapshot = await state.page.evaluate(() => {
+            return {
+                url: window.location.href,
+                elementCount: document.querySelectorAll('*').length,
+                bodyText: document.body.textContent?.substring(0, 500) || ''
+            };
+        });
+        
+        const changed = 
+            beforeSnapshot.url !== afterSnapshot.url ||
+            beforeSnapshot.elementCount !== afterSnapshot.elementCount ||
+            beforeSnapshot.bodyText !== afterSnapshot.bodyText;
+        
+        if (!changed) {
+            log(`   ⚠️ WARNING: DOM did not change after action - click may have failed silently`);
+        }
+        
+        return changed;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Additional verification: Check if element is actually clickable before attempting click
+ */
+async function isElementClickable(selector: string, target: string, frame: any = null): Promise<boolean> {
+    try {
+        const searchTarget = frame || state.page;
+        if (!searchTarget) return false;
+        
+        const clickable = await searchTarget.evaluate(({sel, searchText}) => {
+            let element = null;
+            
+            // Try selector
+            if (sel) {
+                try {
+                    element = document.querySelector(sel);
+                } catch (e) {}
+            }
+            
+            // Search by text if needed
+            if (!element) {
+                const allElements = document.querySelectorAll('*');
+                const searchLower = searchText.toLowerCase();
+                for (const el of Array.from(allElements)) {
+                    const text = (el.textContent || '').toLowerCase();
+                    if (text.includes(searchLower)) {
+                        element = el;
+                        break;
+                    }
+                }
+            }
+            
+            if (!element) return false;
+            
+            const style = window.getComputedStyle(element);
+            const rect = (element as HTMLElement).getBoundingClientRect();
+            
+            // Check: visible, has dimensions, and is clickable element type
+            return (
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                style.opacity !== '0' &&
+                rect.width > 0 &&
+                rect.height > 0 &&
+                (element.tagName === 'BUTTON' || 
+                 element.tagName === 'A' || 
+                 element.getAttribute('role') === 'button' ||
+                 element.getAttribute('role') === 'tab' ||
+                 element.getAttribute('onclick') !== null ||
+                 (element.tagName === 'INPUT' && (element.getAttribute('type') === 'button' || element.getAttribute('type') === 'submit')))
+            );
+        }, {sel: selector, searchText: target});
+        
+        return clickable;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Safely execute a click and verify it was successful before reporting
+ */
+async function safeClickElement(target: string, selector?: string): Promise<{success: boolean; reason: string}> {
+    if (!state.page || state.page.isClosed()) {
+        return {success: false, reason: 'Page is closed'};
+    }
+    
+    try {
+        // First verify element is clickable
+        const isClickable = await isElementClickable(selector || target, target);
+        if (!isClickable) {
+            return {success: false, reason: 'Element not found or not clickable'};
+        }
+        
+        // Element verified - now click it
+        if (selector) {
+            try {
+                await state.page.click(selector, {timeout: 3000});
+            } catch (e) {
+                return {success: false, reason: `Selector click failed: ${e}`};
+            }
+        } else {
+            // Use text-based search
+            const result = await searchInAllFrames(target, 'click');
+            if (!result) {
+                return {success: false, reason: 'Click failed in all frames'};
+            }
+        }
+        
+        // Wait for action to process
+        await state.page.waitForTimeout(300);
+        
+        // Verify action took effect
+        const changed = await verifyActionTookEffect('click', 1500);
+        if (changed) {
+            return {success: true, reason: 'Element clicked and DOM changed'};
+        } else {
+            return {success: true, reason: 'Element clicked (DOM change not detected)'};
+        }
+    } catch (e: any) {
+        return {success: false, reason: `Exception: ${e.message}`};
+    }
+}
+
 /* ============== ENHANCED FRAME & DYNAMIC ELEMENT HANDLING ============== */
 
 /**
@@ -1772,6 +1976,317 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                     }
                 }
             }
+
+            // **SPECIAL HANDLER FOR SIGN IN / LOGIN BUTTONS - RUN FIRST**
+            if (targetLower.includes('sign') && targetLower.includes('in')) {
+                const isExactSignIn = !targetLower.includes('partner') && !targetLower.includes('business');
+                
+                // PRE-FLIGHT: Quick check using evaluate to find EXACT match FIRST
+                if (isExactSignIn) {
+                    try {
+                        const found = await frame.evaluate(() => {
+                            const elements = Array.from(document.querySelectorAll('a, button, [role="button"], span'));
+                            
+                            // Look for EXACT text match only
+                            for (const el of elements) {
+                                const text = (el.textContent || '').trim();
+                                const textLower = text.toLowerCase();
+                                
+                                // EXACT ONLY - no substrings, no variations
+                                if (textLower === 'sign in' || textLower === 'signin' || 
+                                    textLower === 'sign-in' || textLower === 'login') {
+                                    
+                                    // MUST NOT contain "Partners" or "Business"
+                                    if (!text.includes('Partners') && !text.includes('Business') && 
+                                        !text.includes('partners') && !text.includes('business')) {
+                                        
+                                        const rect = el.getBoundingClientRect();
+                                        const style = window.getComputedStyle(el);
+                                        
+                                        if (style.display !== 'none' && style.visibility !== 'hidden' &&
+                                            rect.width > 0 && rect.height > 0) {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                            return false;
+                        });
+                        
+                        if (found) {
+                            // Click it using Playwright
+                            const exactElement = await frame.locator('text=/^sign in$/i, text=/^signin$/i, text=/^sign-in$/i, text=/^login$/i').first();
+                            const visible = await exactElement.isVisible().catch(() => false);
+                            
+                            if (visible) {
+                                // Double-check it's not partners
+                                const text = await exactElement.textContent().catch(() => '');
+                                if (!text.toLowerCase().includes('partner') && !text.toLowerCase().includes('business')) {
+                                    await exactElement.click({ timeout: 5000 }).catch(async () => {
+                                        await exactElement.evaluate((e: any) => e.click());
+                                    });
+                                    log(`✅ Clicked: "${text.trim()}"`);
+                                    await frame.waitForTimeout(2000);
+                                    return true;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Continue to fallback
+                    }
+                }
+                
+                // FALLBACK: Original strategy
+                try {
+                    const allElements = await frame.locator('a, button, [role="button"], div[onclick], span[onclick]').all();
+                    
+                    for (const el of allElements) {
+                        const text = await el.textContent().catch(() => '');
+                        const textTrim = text.trim();
+                        const textLower = textTrim.toLowerCase();
+                        
+                        // For exact "Sign In" search - must NOT have prefixes
+                        if (isExactSignIn) {
+                            // Match ONLY exact: "Sign In", "signin", "Sign in", "SignIn", etc.
+                            const isExactMatch = textLower === 'sign in' || 
+                                                textLower === 'signin' || 
+                                                textLower === 'sign-in' || 
+                                                textLower === 'login';
+                            
+                            if (!isExactMatch) continue;
+                            
+                            // Double-check it doesn't have "Partners" or "Business" prefix
+                            if (textLower.includes('partner') || textLower.includes('business')) {
+                                continue;
+                            }
+                            
+                            // This is the real "Sign In" button!
+                            const visible = await el.isVisible().catch(() => false);
+                            if (visible) {
+                                await el.scrollIntoViewIfNeeded();
+                                await el.click({ timeout: 5000 }).catch(async () => {
+                                    await el.evaluate((e: any) => e.click());
+                                });
+                                log(`✅ Clicked: "${textTrim}"`);
+                                await frame.waitForTimeout(2000);
+                                return true;
+                            }
+                        } else {
+                            // For "Partners Sign In" or "Business Sign In" - require the full text
+                            if (textLower.includes(targetLower)) {
+                                const visible = await el.isVisible().catch(() => false);
+                                if (visible) {
+                                    await el.scrollIntoViewIfNeeded();
+                                    await el.click({ timeout: 5000 }).catch(async () => {
+                                        await el.evaluate((e: any) => e.click());
+                                    });
+                                    log(`✅ Clicked: "${textTrim}"`);
+                                    await frame.waitForTimeout(2000);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Fallback: If searching for exact "Sign In", try icon buttons in top-right
+                    if (isExactSignIn) {
+                        const iconButton = await frame.evaluate(() => {
+                            const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+                            for (const el of elements) {
+                                const rect = el.getBoundingClientRect();
+                                const text = (el.textContent || '').trim();
+                                // Top-right area, small button, no text (icon button)
+                                if (rect.x > 600 && rect.x < 900 && rect.top < 60 && 
+                                    rect.height < 60 && rect.width < 60 && !text) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        });
+                        
+                        if (iconButton) {
+                            const topRightButton = await frame.locator('a[href*="#"], a[href*="account"]').first();
+                            const visible = await topRightButton.isVisible().catch(() => false);
+                            if (visible) {
+                                await topRightButton.click({ timeout: 5000 }).catch(async () => {
+                                    await topRightButton.evaluate((e: any) => e.click());
+                                });
+                                log(`✅ Clicked: Sign In`);
+                                await frame.waitForTimeout(2000);
+                                return true;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Silent fail, continue to next strategy
+                }
+            }
+
+            // **SPECIAL HANDLER FOR DROPDOWN/SELECT ELEMENTS**
+            try {
+                // Check if target is a dropdown item - if so, open parent dropdown first
+                const allElements = await frame.locator('a, button, [role="button"], [role="option"], [role="menuitem"], li, div[onclick], span').all();
+                
+                let foundElement: any = null;
+                let foundText: string = '';
+                for (const el of allElements) {
+                    const text = await el.textContent().catch(() => '');
+                    if (text.toLowerCase().includes(targetLower)) {
+                        foundElement = el;
+                        foundText = text;
+                        break;
+                    }
+                }
+                
+                if (foundElement) {
+                    try {
+                        // Check if element is hidden (likely in a closed dropdown)
+                        const isVisible = await foundElement.isVisible().catch(() => false);
+                        
+                        if (!isVisible) {
+                            // Try to find and open parent dropdown
+                            const parentDropdown = await foundElement.evaluate((el: any) => {
+                                let current = el;
+                                while (current && current !== document.documentElement) {
+                                    const classList = current.className || '';
+                                    const isDropdown = classList.includes('dropdown') || 
+                                                     classList.includes('menu') || 
+                                                     classList.includes('select') ||
+                                                     current.getAttribute('role') === 'listbox' ||
+                                                     current.getAttribute('data-role') === 'dropdown';
+                                    if (isDropdown) return current;
+                                    current = current.parentElement;
+                                }
+                                return null;
+                            }).catch(() => null);
+                            
+                            if (parentDropdown) {
+                                // Click parent to open dropdown
+                                const parentButton = await frame.locator('button, [role="button"], a').filter({ 
+                                    has: foundElement 
+                                }).first();
+                                
+                                try {
+                                    await parentButton.click({ timeout: 2000 }).catch(() => {
+                                        return parentButton.evaluate((e: any) => e.click());
+                                    });
+                                    await frame.waitForTimeout(300);
+                                } catch (e) {
+                                    // Parent click failed, continue
+                                }
+                            }
+                        }
+                        
+                        // Now try to click the target element
+                        const visible = await foundElement.isVisible().catch(() => false);
+                        if (visible) {
+                            await foundElement.scrollIntoViewIfNeeded();
+                            await foundElement.click({ timeout: 5000 }).catch(async () => {
+                                await foundElement.evaluate((e: any) => e.click());
+                            });
+                            log(`✅ Clicked: "${foundText.trim()}"`);
+                            await frame.waitForTimeout(500);
+                            return true;
+                        }
+                    } catch (e) {
+                        // Continue to next strategy
+                    }
+                }
+            } catch (e) {
+                // Dropdown handling failed, continue
+            }
+
+            // **SPECIAL HANDLER FOR SIGN IN / LOGIN BUTTONS - RUN FIRST**
+            if (targetLower.includes('sign') && targetLower.includes('in')) {
+                // Determine what we're looking for
+                const isExactSignIn = !targetLower.includes('partner') && !targetLower.includes('business');
+                
+                try {
+                    // Strategy 1: Find EXACT text match
+                    const allElements = await frame.locator('a, button, [role="button"], div[onclick], span[onclick]').all();
+                    
+                    for (const el of allElements) {
+                        const text = await el.textContent().catch(() => '');
+                        const textTrim = text.trim();
+                        const textLower = textTrim.toLowerCase();
+                        
+                        // For exact "Sign In" search - must NOT have prefixes
+                        if (isExactSignIn) {
+                            // Match ONLY exact: "Sign In", "signin", "Sign in", "SignIn", etc.
+                            const isExactMatch = textLower === 'sign in' || 
+                                                textLower === 'signin' || 
+                                                textLower === 'sign-in' || 
+                                                textLower === 'login';
+                            
+                            if (!isExactMatch) continue;
+                            
+                            // Double-check it doesn't have "Partners" or "Business" prefix
+                            if (textLower.includes('partner') || textLower.includes('business')) {
+                                continue;
+                            }
+                            
+                            // This is the real "Sign In" button!
+                            const visible = await el.isVisible().catch(() => false);
+                            if (visible) {
+                                await el.scrollIntoViewIfNeeded();
+                                await el.click({ timeout: 5000 }).catch(async () => {
+                                    await el.evaluate((e: any) => e.click());
+                                });
+                                log(`✅ Clicked: "${textTrim}"`);
+                                await frame.waitForTimeout(2000);
+                                return true;
+                            }
+                        } else {
+                            // For "Partners Sign In" or "Business Sign In" - require the full text
+                            if (textLower.includes(targetLower)) {
+                                const visible = await el.isVisible().catch(() => false);
+                                if (visible) {
+                                    await el.scrollIntoViewIfNeeded();
+                                    await el.click({ timeout: 5000 }).catch(async () => {
+                                        await el.evaluate((e: any) => e.click());
+                                    });
+                                    log(`✅ Clicked: "${textTrim}"`);
+                                    await frame.waitForTimeout(2000);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Fallback: If searching for exact "Sign In", try icon buttons in top-right
+                    if (isExactSignIn) {
+                        const iconButton = await frame.evaluate(() => {
+                            const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+                            for (const el of elements) {
+                                const rect = el.getBoundingClientRect();
+                                const text = (el.textContent || '').trim();
+                                // Top-right area, small button, no text (icon button)
+                                if (rect.x > 600 && rect.x < 900 && rect.top < 60 && 
+                                    rect.height < 60 && rect.width < 60 && !text) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        });
+                        
+                        if (iconButton) {
+                            const topRightButton = await frame.locator('a[href*="#"], a[href*="account"]').first();
+                            const visible = await topRightButton.isVisible().catch(() => false);
+                            if (visible) {
+                                await topRightButton.click({ timeout: 5000 }).catch(async () => {
+                                    await topRightButton.evaluate((e: any) => e.click());
+                                });
+                                log(`✅ Clicked: Sign In`);
+                                await frame.waitForTimeout(2000);
+                                return true;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Silent fail, continue to next strategy
+                }
+            }
+
         } catch (e) {
             // Pattern search failed
         }
@@ -1807,17 +2322,26 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                     
                     // Check if target matches
                     if (allText.includes(targetLower)) {
-                        log(`      ✓ FOUND MATCH [${tagName}#${id}]: text="${text.slice(0, 30)}" | title="${title}" | value="${value}"`);
+                        // SPECIAL: For "Sign In" target, ONLY match exact "Sign In", NOT "Partners Sign In"
+                        if (targetLower === 'sign in' || targetLower === 'signin') {
+                            // For exact "Sign In", text must be EXACTLY that, not with prefixes
+                            const textLower = text.toLowerCase().trim();
+                            const isExactSignIn = textLower === 'sign in' || textLower === 'signin' || 
+                                                 textLower === 'sign-in' || textLower === 'login';
+                            
+                            if (!isExactSignIn || textLower.includes('partner') || textLower.includes('business')) {
+                                continue;
+                            }
+                        }
                         
                         // Try to click with multiple methods
                         try {
                             // Method 1: Force click
                             await el.click({ force: true, timeout: 5000 }).catch(() => {});
-                            log(`✅ [ENHANCED${framePath}] Clicked element: "${target}"`);
+                            log(`✅ Clicked: "${target}"`);
                             await frame.waitForTimeout(500);
                             return true;
                         } catch (e1) {
-                            log(`      ⚠️  Force click failed, trying JavaScript...`);
                             // Method 2: JavaScript click
                             try {
                                 const clicked = await el.evaluate((element: any) => {
@@ -1830,12 +2354,11 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                                     }
                                 });
                                 if (clicked) {
-                                    log(`✅ [ENHANCED-JS${framePath}] Clicked element (JavaScript): "${target}"`);
+                                    log(`✅ Clicked: "${target}"`);
                                     await frame.waitForTimeout(500);
                                     return true;
                                 }
                             } catch (e2) {
-                                log(`      ⚠️  JavaScript click failed, continuing...`);
                                 // Continue to next element
                             }
                         }
@@ -1890,33 +2413,46 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                         }
                         
                         if (isMatch) {
-                            // Match if element is clickable - EXPANDED criteria
-                            const isClickable = (
-                                el.tagName === 'BUTTON' || 
-                                el.tagName === 'INPUT' ||
-                                el.tagName === 'A' || 
-                                el.getAttribute('role') === 'button' || 
-                                el.getAttribute('role') === 'menuitem' ||
-                                el.getAttribute('role') === 'tab' ||
-                                el.getAttribute('role') === 'link' ||
-                                el.onclick !== null || 
-                                el.getAttribute('onclick') ||
-                                el.className.includes('btn') ||
-                                el.className.includes('button') ||
-                                el.className.includes('clickable') ||
-                                el.style.cursor === 'pointer' ||
-                                el.style.cursor === 'hand'
-                            );
+                            // SPECIAL: For exact "Sign In" search, skip "Partners Sign In"
+                            let shouldSkip = false;
+                            if ((searchLower === 'sign in' || searchLower === 'signin') && 
+                                !searchLower.includes('partner') && !searchLower.includes('business')) {
+                                // Only match exact "Sign In", not variants
+                                const isExactSignIn = text === 'Sign In' || text === 'signin' || text === 'sign-in' || text === 'login';
+                                if (!isExactSignIn && (text.includes('Partner') || text.includes('Business'))) {
+                                    // This is "Partners Sign In" or similar - skip it
+                                    shouldSkip = true;
+                                }
+                            }
                             
-                            if (isClickable) {
-                                foundMatch = el; // Store first match
-                                // IMPORTANT: Try to click directly in JavaScript
-                                // This bypasses visibility checks - works for overlaid/hidden elements
-                                try {
-                                    el.click();
-                                    return true;
-                                } catch (e) {
-                                    // If normal click fails, try multiple fallback methods
+                            if (!shouldSkip) {
+                                // Match if element is clickable - EXPANDED criteria
+                                const isClickable = (
+                                    el.tagName === 'BUTTON' || 
+                                    el.tagName === 'INPUT' ||
+                                    el.tagName === 'A' || 
+                                    el.getAttribute('role') === 'button' || 
+                                    el.getAttribute('role') === 'menuitem' ||
+                                    el.getAttribute('role') === 'tab' ||
+                                    el.getAttribute('role') === 'link' ||
+                                    el.onclick !== null || 
+                                    el.getAttribute('onclick') ||
+                                    el.className.includes('btn') ||
+                                    el.className.includes('button') ||
+                                    el.className.includes('clickable') ||
+                                    el.style.cursor === 'pointer' ||
+                                    el.style.cursor === 'hand'
+                                );
+                                
+                                if (isClickable) {
+                                    foundMatch = el; // Store first match
+                                    // IMPORTANT: Try to click directly in JavaScript
+                                    // This bypasses visibility checks - works for overlaid/hidden elements
+                                    try {
+                                        el.click();
+                                        return true;
+                                    } catch (e) {
+                                        // If normal click fails, try multiple fallback methods
                                     try {
                                         el.scrollIntoView({ behavior: 'auto', block: 'center' });
                                         el.click();
@@ -1940,6 +2476,7 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                                     }
                                 }
                             }
+                            }  // Close the if (!shouldSkip) block
                         }
                     }
                     
@@ -3322,7 +3859,7 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
 
             // Strategy 0: Handle visible modals/overlays - DIRECTLY CLICK visible elements
             try {
-                const clicked = await state.page?.evaluate((searchText) => {
+                const clickResult = await state.page?.evaluate((searchText) => {
                     // THREE-PASS STRATEGY for SHORT TEXT targeting (like "P", "O", etc.):
                     // PASS 1: STRICT - Only exact match on BUTTON's direct visible text
                     const searchLower = searchText.toLowerCase().trim();
@@ -3436,8 +3973,18 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                     return false;
                 }, target);
 
-                if (clicked) {
-                    await state.page?.waitForTimeout(300);
+                if (clickResult) {
+                    log(`✅ [STRATEGY-0] Element found and clicked: "${target}" | Waiting for action effect...`);
+                    await state.page?.waitForTimeout(500);
+                    
+                    // Verify the action actually took effect
+                    const changed = await verifyActionTookEffect('click', 2000);
+                    if (changed) {
+                        log(`✅ [STRATEGY-0-VERIFIED] Action confirmed - DOM changed after click`);
+                    } else {
+                        log(`⚠️  [STRATEGY-0-WARN] Click executed but DOM did not change - may need retry`);
+                    }
+                    
                     // Detect any newly opened nested windows from this click
                     await detectNewNestedWindows(state.page!).catch(() => {});
                     return true;
@@ -3446,38 +3993,114 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 // Modal strategy failed, continue
             }
 
+            // **PRIORITY STRATEGY: Special handling for Sign In / Login**
+            if (target.toLowerCase().includes('sign') && target.toLowerCase().includes('in')) {
+                try {
+                    log(`[SIGNIN-PRIORITY] Special handling for Sign In button...`);
+                    
+                    // Store initial URL/title to verify navigation
+                    const initialUrl = state.page?.url();
+                    const initialTitle = await state.page?.title();
+                    
+                    const found = await state.page?.evaluate((searchText) => {
+                        const searchLower = searchText.toLowerCase();
+                        const allElements = document.querySelectorAll('a, button, [role="button"]');
+                        
+                        // Look for sign in with flexible matching
+                        for (const el of Array.from(allElements)) {
+                            const text = (el.textContent || '').toLowerCase().trim();
+                            const href = (el as any).href ? (el as any).href.toLowerCase() : '';
+                            const onclick = (el as any).onclick ? (el as any).onclick.toString().toLowerCase() : '';
+                            
+                            // Match "sign in", "signin", "sign-in", "login"
+                            const hasSignIn = text.includes('sign in') || text.includes('signin') || text.includes('sign-in') || text.includes('login');
+                            const isLink = (el as any).href && ((el as any).href.includes('login') || (el as any).href.includes('signin') || (el as any).href.includes('myaccount'));
+                            
+                            if (hasSignIn || isLink) {
+                                const style = window.getComputedStyle(el);
+                                const rect = (el as HTMLElement).getBoundingClientRect();
+                                if (style.display !== 'none' && style.visibility !== 'hidden' && 
+                                    rect.width > 0 && rect.height > 0 && 
+                                    rect.top >= -100 && rect.bottom <= window.innerHeight + 100) {
+                                    
+                                    // Log what we found
+                                    console.log(`[FOUND] text="${text.slice(0,30)}" href="${href.slice(0,40)}"`);
+                                    
+                                    if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                                        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                    (el as HTMLElement).click();
+                                    return { found: true, text: text.slice(0, 30), href: href.slice(0, 50) };
+                                }
+                            }
+                        }
+                        return { found: false };
+                    }, target);
+                    
+                    if (found && (found as any).found) {
+                        log(`✅ [SIGNIN-PRIORITY] Clicked element: text="${(found as any).text}" href="${(found as any).href}"`);
+                        await state.page?.waitForTimeout(2000);
+                        
+                        // Verify navigation occurred
+                        const newUrl = state.page?.url();
+                        const newTitle = await state.page?.title();
+                        
+                        if (newUrl !== initialUrl) {
+                            log(`✅ [SIGNIN-VERIFIED] Navigation confirmed! URL changed from "${initialUrl}" to "${newUrl}"`);
+                        } else {
+                            log(`⚠️  [SIGNIN-WARNING] Click executed but page did not navigate. Still on: ${initialUrl}`);
+                        }
+                        
+                        await detectNewNestedWindows(state.page!).catch(() => {});
+                        return true;
+                    } else {
+                        log(`❌ [SIGNIN-FAILED] Could not find visible Sign In button on page`);
+                    }
+                } catch (signinErr) {
+                    log(`   ℹ️ [SIGNIN-PRIORITY] Failed: ${signinErr}`);
+                }
+            }
+
             // Strategy 1: Try direct selector without scrolling first
             try {
+                log(`[STRATEGY-1] Attempting direct selector: "${target}"`);
                 await state.page?.click(target, { timeout: 1500 });
+                log(`✅ [STRATEGY-1] Direct selector click succeeded`);
+                await state.page?.waitForTimeout(300);
                 return true;
             } catch (e1) {
                 // If not found, try with scroll as fallback
                 try {
+                    log(`[STRATEGY-1B] Trying with scroll...`);
                     await scrollToElement(target);
                     await state.page?.click(target, { timeout: 3000 });
+                    log(`✅ [STRATEGY-1B] Scroll + click succeeded`);
+                    await state.page?.waitForTimeout(300);
                     return true;
                 } catch (e1b) {
                     // Direct selector failed
+                    log(`   ℹ️ Direct selector failed: ${e1b}`);
                 }
             }
 
             // Strategy 2: Find by text and click
             try {
-                log(`Searching for text: ${target}`);
+                log(`[STRATEGY-2] Searching for text: "${target}"`);
                 const scrollSuccess = await scrollToElementByText(target);
                 if (scrollSuccess) {
                     const buttonSelector = await findButtonByText(target);
                     if (buttonSelector) {
-                        log(`Found button by text: ${buttonSelector}`);
+                        log(`✅ [STRATEGY-2] Found button: ${buttonSelector}`);
                         await state.page?.click(buttonSelector, { timeout: 3000 });
-                        log(`Clicked by text matching`);
+                        log(`✅ [STRATEGY-2] Clicked by text matching`);
+                        await state.page?.waitForTimeout(300);
                         // Detect any newly opened nested windows from this click
                         await detectNewNestedWindows(state.page!).catch(() => {});
                         return true;
                     }
                 }
             } catch (e2) {
-                log(`Text matching failed`);
+                log(`   ℹ️ [STRATEGY-2] Text matching failed: ${e2}`);
             }
 
             // Strategy 2.5: Shadow DOM and nested element search
@@ -3656,6 +4279,45 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
         if (subwindowResult) {
             return true;
         }
+    }
+
+    // CLICK FAILED - Provide diagnostic information
+    log(`\n❌ [CLICK FAILED] Unable to find or click element: "${target}"`);
+    
+    try {
+        // Diagnostic: Check if element exists on page at all
+        const elementExists = await state.page?.evaluate((searchText) => {
+            const lower = searchText.toLowerCase();
+            const allElements = document.querySelectorAll('*');
+            for (const el of Array.from(allElements)) {
+                const text = (el.textContent || '').toLowerCase();
+                if (text.includes(lower)) {
+                    const style = window.getComputedStyle(el);
+                    return {
+                        found: true,
+                        text: (el.textContent || '').substring(0, 100),
+                        visible: style.display !== 'none' && style.visibility !== 'hidden',
+                        tagName: el.tagName,
+                        className: el.className
+                    };
+                }
+            }
+            return {found: false, text: '', visible: false, tagName: '', className: ''};
+        }, target);
+        
+        if (elementExists?.found) {
+            if (!elementExists.visible) {
+                log(`   ⚠️  Element FOUND but HIDDEN (${elementExists.tagName}.${elementExists.className}) | Text: "${elementExists.text}"`);
+            } else {
+                log(`   ⚠️  Element FOUND and VISIBLE (${elementExists.tagName}) | Text: "${elementExists.text}"`);
+                log(`   → This likely means: Click strategy failed, try manual element path or different identifier`);
+            }
+        } else {
+            log(`   ⚠️  Element NOT FOUND on page at all`);
+            log(`   → Search for similar text:  "${target}"`);
+        }
+    } catch (diagErr) {
+        log(`   ℹ️  Diagnostic check failed: ${diagErr}`);
     }
 
     return false;
@@ -3942,6 +4604,51 @@ async function fillWithRetry(target: string, value: string, maxRetries: number =
         } catch (swError) {
             log(`Subwindow fill search failed`);
         }
+    }
+
+    // FILL FAILED - Provide diagnostic information
+    log(`\n❌ [FILL FAILED] Unable to find or fill field: "${target}" with value: "${value}"`);
+    
+    try {
+        // Diagnostic: Check if input field exists
+        const fieldExists = await state.page?.evaluate((searchText) => {
+            const lower = searchText.toLowerCase();
+            const inputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
+            for (const input of Array.from(inputs)) {
+                const placeholder = (input as any).placeholder || '';
+                const label = input.getAttribute('aria-label') || '';
+                const name = (input as any).name || '';
+                const id = (input as any).id || '';
+                
+                const allAttrs = `${placeholder} ${label} ${name} ${id}`.toLowerCase();
+                
+                if (allAttrs.includes(lower)) {
+                    const style = window.getComputedStyle(input);
+                    return {
+                        found: true,
+                        attributes: {placeholder, name, id, label},
+                        visible: style.display !== 'none' && style.visibility !== 'hidden',
+                        type: (input as any).type,
+                        value: (input as any).value
+                    };
+                }
+            }
+            return {found: false, attributes: {}, visible: false, type: '', value: ''};
+        }, target);
+        
+        if (fieldExists?.found) {
+            if (!fieldExists.visible) {
+                log(`   ⚠️  Field FOUND but HIDDEN | Type: ${fieldExists.type} | Placeholder: "${fieldExists.attributes.placeholder}"`);
+            } else {
+                log(`   ⚠️  Field FOUND and VISIBLE | Type: ${fieldExists.type} | Current Value: "${fieldExists.value}"`);
+                log(`   → Try using a different field identifier or check field attributes`);
+            }
+        } else {
+            log(`   ⚠️  Field NOT FOUND on page`);
+            log(`   → Search for field with label: "${target}"`);
+        }
+    } catch (diagErr) {
+        log(`   ℹ️  Diagnostic check failed: ${diagErr}`);
     }
 
     return false;
