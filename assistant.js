@@ -1845,7 +1845,7 @@ async function executeClickInFrame(frame, target, framePath) {
                                     await exactElement.click({ timeout: 5000 }).catch(async () => {
                                         await exactElement.evaluate((e) => e.click());
                                     });
-                                    log(`✅ Clicked: "${text.trim()}"`);
+                                    log(`✅ Clicked: "${text.trim().substring(0, 60)}${text.trim().length > 60 ? '...' : ''}"`);
                                     await frame.waitForTimeout(2000);
                                     return true;
                                 }
@@ -1995,7 +1995,8 @@ async function executeClickInFrame(frame, target, framePath) {
                             await foundElement.click({ timeout: 5000 }).catch(async () => {
                                 await foundElement.evaluate((e) => e.click());
                             });
-                            log(`✅ Clicked: "${foundText.trim()}"`);
+                            const truncated = foundText.trim().substring(0, 60) + (foundText.trim().length > 60 ? '...' : '');
+                            log(`✅ Clicked: "${truncated}"`);
                             await frame.waitForTimeout(500);
                             return true;
                         }
@@ -2039,7 +2040,8 @@ async function executeClickInFrame(frame, target, framePath) {
                                 await el.click({ timeout: 5000 }).catch(async () => {
                                     await el.evaluate((e) => e.click());
                                 });
-                                log(`✅ Clicked: "${textTrim}"`);
+                                const truncated = textTrim.substring(0, 60) + (textTrim.length > 60 ? '...' : '');
+                                log(`✅ Clicked: "${truncated}"`);
                                 await frame.waitForTimeout(2000);
                                 return true;
                             }
@@ -2053,7 +2055,8 @@ async function executeClickInFrame(frame, target, framePath) {
                                     await el.click({ timeout: 5000 }).catch(async () => {
                                         await el.evaluate((e) => e.click());
                                     });
-                                    log(`✅ Clicked: "${textTrim}"`);
+                                    const truncated2 = textTrim.substring(0, 60) + (textTrim.length > 60 ? '...' : '');
+                                    log(`✅ Clicked: "${truncated2}"`);
                                     await frame.waitForTimeout(2000);
                                     return true;
                                 }
@@ -3468,99 +3471,6 @@ async function searchInPageOverlays(target, action, fillValue) {
     }
 }
 /**
- * Search for menu item while keeping parent menu context in mind
- */
-async function handleNestedMenuItemWithContext(target, parentMenuContext) {
-    if (!state.page || state.page.isClosed())
-        return false;
-    try {
-        log(`\n🎯 [MENU CONTEXT SEARCH] Looking for "${target}" within "${parentMenuContext}" menu`);
-        // Search with strong priority for menu area (top 400px)
-        const clicked = await state.page.evaluate(({ searchText }) => {
-            const allElements = Array.from(document.querySelectorAll('*'));
-            const matches = [];
-            // Find all elements matching the search text
-            for (const el of allElements) {
-                const elementText = (el.textContent || '').trim();
-                if (elementText.toLowerCase() === searchText.toLowerCase() ||
-                    (elementText.toLowerCase().includes(searchText.toLowerCase()) && elementText.length < 100)) {
-                    matches.push(el);
-                }
-            }
-            if (matches.length === 0)
-                return false;
-            // PRIORITY 1: Elements in TOP AREA (menu dropdown area - usually top 400px)
-            const topMatches = matches.filter(el => {
-                const rect = el.getBoundingClientRect();
-                return rect.top >= 0 && rect.top < 400; // Menu dropdown usually in top 400px
-            });
-            // Try top area matches first
-            for (const el of topMatches) {
-                const rect = el.getBoundingClientRect();
-                if (['A', 'BUTTON'].includes(el.tagName)) {
-                    if (rect.height > 0 && rect.width > 0 && rect.left >= 0) {
-                        el.click();
-                        return true;
-                    }
-                }
-                let parent = el.parentElement;
-                let depth = 0;
-                while (parent && depth < 2) {
-                    if (['A', 'BUTTON'].includes(parent.tagName) ||
-                        ['button', 'menuitem', 'link', 'navigation'].includes(parent.getAttribute('role') || '')) {
-                        const parentRect = parent.getBoundingClientRect();
-                        if (parentRect.height > 0 && parentRect.width > 0 && parentRect.left >= 0) {
-                            parent.click();
-                            return true;
-                        }
-                    }
-                    parent = parent.parentElement;
-                    depth++;
-                }
-            }
-            // If no top matches found, try all other matches but skip overlay area (bottom 100px)
-            const otherMatches = matches.filter(el => {
-                const rect = el.getBoundingClientRect();
-                return rect.top >= 400 && rect.top < (window.innerHeight - 100);
-            });
-            for (const el of otherMatches) {
-                const rect = el.getBoundingClientRect();
-                if (['A', 'BUTTON'].includes(el.tagName)) {
-                    if (rect.height > 0 && rect.width > 0 && rect.left >= 0) {
-                        el.click();
-                        return true;
-                    }
-                }
-                let parent = el.parentElement;
-                let depth = 0;
-                while (parent && depth < 2) {
-                    if (['A', 'BUTTON'].includes(parent.tagName) ||
-                        ['button', 'menuitem', 'link'].includes(parent.getAttribute('role') || '')) {
-                        const parentRect = parent.getBoundingClientRect();
-                        if (parentRect.height > 0 && parentRect.width > 0 && parentRect.left >= 0) {
-                            parent.click();
-                            return true;
-                        }
-                    }
-                    parent = parent.parentElement;
-                    depth++;
-                }
-            }
-            return false;
-        }, { searchText: target });
-        if (clicked) {
-            log(`   ✅ Successfully clicked "${target}" within "${parentMenuContext}" menu`);
-            return true;
-        }
-        log(`   ❌ Could not find "${target}" within "${parentMenuContext}" menu area`);
-        return false;
-    }
-    catch (error) {
-        log(`[MENU CONTEXT SEARCH ERROR] ${error.message}`);
-        return false;
-    }
-}
-/**
  * DROPDOWN DETECTOR - AGGRESSIVE DETECTION
  * Scans entire DOM for ANY visible container that looks like a dropdown
  * HIGHEST PRIORITY: Find ALL visible menus/dropdowns
@@ -3873,144 +3783,6 @@ async function searchInOpenDropdowns(target) {
     }
 }
 /**
- * NESTED MENU HANDLER - For menu items that require hover to appear
- * ENHANCED: Tracks open menus and prioritizes elements within open menu context
- *
- * This prevents clicking wrong elements when multiple elements with same text exist
- */
-async function handleNestedMenuItem(target) {
-    if (!state.page || state.page.isClosed())
-        return false;
-    try {
-        log(`\n🎯 [NESTED MENU] Attempting to handle nested menu item: "${target}"`);
-        log(`   📌 Active Menu Context: ${state.activeMenuContext || 'None'}`);
-        // Strategy: Try to find a parent menu item that we should hover over
-        const parentMenuKeywords = ['Loans', 'Products', 'Services', 'Menu', 'Navigation', 'EMI', 'All Loans', 'Cards', 'Insurance', 'Investments'];
-        // For each potential parent, try: hover parent -> wait -> click target
-        for (const parentKeyword of parentMenuKeywords) {
-            try {
-                log(`\n   🔍 Trying hover pattern: Hover "${parentKeyword}" → Click "${target}"`);
-                // Step 1: Find the parent menu button/link
-                const parentElements = await state.page.locator(`button:has-text("${parentKeyword}")`).all().catch(() => []);
-                if (parentElements.length === 0) {
-                    const linkElements = await state.page.locator(`a:has-text("${parentKeyword}")`).all().catch(() => []);
-                    if (linkElements.length === 0)
-                        continue;
-                }
-                // Step 2: Hover the parent to open submenu
-                log(`   ↳ Hovering over "${parentKeyword}"...`);
-                try {
-                    await state.page.locator(`button:has-text("${parentKeyword}"), a:has-text("${parentKeyword}")`).first().hover({ timeout: 5000 });
-                }
-                catch (e) {
-                    await state.page.evaluate(({ keyword }) => {
-                        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"], [role="menuitem"]'));
-                        const parent = buttons.find(b => (b.textContent || '').includes(keyword));
-                        if (parent) {
-                            const event = new MouseEvent('mouseenter', { bubbles: true });
-                            parent.dispatchEvent(event);
-                        }
-                    }, { keyword: parentKeyword });
-                }
-                // Step 3: Update menu context and wait for submenu
-                state.activeMenuContext = parentKeyword;
-                state.activeMenuOpenTime = Date.now();
-                log(`   ↳ [MENU OPEN] "${parentKeyword}" menu opened - searching within this context`);
-                await state.page.waitForTimeout(800);
-                // Step 4: Click target within the open menu context
-                log(`   ↳ Attempting to click "${target}" from "${parentKeyword}" menu...`);
-                const clicked = await state.page.evaluate(({ searchText, parentMenu }) => {
-                    const allElements = Array.from(document.querySelectorAll('*'));
-                    const matches = [];
-                    for (const el of allElements) {
-                        const elementText = (el.textContent || '').trim();
-                        // Exact match preferred
-                        if (elementText.toLowerCase() === searchText.toLowerCase() ||
-                            (elementText.toLowerCase().includes(searchText.toLowerCase()) && elementText.length < 100)) {
-                            matches.push(el);
-                        }
-                    }
-                    if (matches.length === 0)
-                        return false;
-                    // PRIORITY: Find elements within the visible menu/dropdown
-                    // by checking if they're near the top of the page (menu is usually at top)
-                    for (const el of matches) {
-                        const rect = el.getBoundingClientRect();
-                        // Prioritize elements at top of page (menu area is usually top 200px from top)
-                        // Skip elements near bottom (overlay area)
-                        if (rect.top < 300 && rect.top >= 0) {
-                            // First, check if element itself is clickable
-                            if (['A', 'BUTTON'].includes(el.tagName)) {
-                                if (rect.height > 0 && rect.width > 0 && rect.left >= 0) {
-                                    el.click();
-                                    return true;
-                                }
-                            }
-                            // Find immediate clickable parent (max 2 levels up)
-                            let parent = el.parentElement;
-                            let depth = 0;
-                            while (parent && depth < 2) {
-                                if (['A', 'BUTTON'].includes(parent.tagName) ||
-                                    ['button', 'menuitem', 'link'].includes(parent.getAttribute('role') || '')) {
-                                    const parentRect = parent.getBoundingClientRect();
-                                    if (parentRect.height > 0 && parentRect.width > 0 && parentRect.left >= 0) {
-                                        parent.click();
-                                        return true;
-                                    }
-                                }
-                                parent = parent.parentElement;
-                                depth++;
-                            }
-                        }
-                    }
-                    // FALLBACK: If not found in menu area, try all matches but prefer top ones
-                    for (const el of matches) {
-                        const rect = el.getBoundingClientRect();
-                        if (['A', 'BUTTON'].includes(el.tagName)) {
-                            if (rect.height > 0 && rect.width > 0 && rect.left >= 0) {
-                                el.click();
-                                return true;
-                            }
-                        }
-                        let parent = el.parentElement;
-                        let depth = 0;
-                        while (parent && depth < 2) {
-                            if (['A', 'BUTTON'].includes(parent.tagName) ||
-                                ['button', 'menuitem', 'link'].includes(parent.getAttribute('role') || '')) {
-                                const parentRect = parent.getBoundingClientRect();
-                                if (parentRect.height > 0 && parentRect.width > 0 && parentRect.left >= 0) {
-                                    parent.click();
-                                    return true;
-                                }
-                            }
-                            parent = parent.parentElement;
-                            depth++;
-                        }
-                    }
-                    return false;
-                }, { searchText: target, parentMenu: parentKeyword });
-                if (clicked) {
-                    log(`   ✅ Successfully clicked "${target}" from "${parentKeyword}" menu`);
-                    state.activeMenuContext = undefined; // Clear menu context
-                    await state.page.waitForTimeout(500);
-                    return true;
-                }
-            }
-            catch (e) {
-                log(`   ❌ Failed with parent "${parentKeyword}": ${e.message}`);
-            }
-        }
-        state.activeMenuContext = undefined; // Clear menu context on failure
-        log(`❌ [NESTED MENU] Could not handle nested menu for: "${target}"`);
-        return false;
-    }
-    catch (error) {
-        log(`[NESTED MENU ERROR] ${error.message}`);
-        state.activeMenuContext = undefined;
-        return false;
-    }
-}
-/**
  * Intelligently retry finding elements across frames and wait for dynamic elements
  * NOTE: Overlays are now searched separately in clickWithRetry/fillWithRetry as Priority 2
  */
@@ -4047,127 +3819,53 @@ async function advancedElementSearch(target, action, fillValue, maxRetries = 3) 
     return false;
 }
 /**
- * HOVER action - Hovers over element to trigger dropdowns/menus/tooltips
- * Allows explicit control over when to hover for dropdown access
+ * HOVER action - Simple hover implementation
  */
 async function hoverWithRetry(target, maxRetries = 5) {
     await waitForPageReady();
     log(`\n🎯 [HOVER ACTION] Hovering over: "${target}"`);
     try {
-        // FIRST: Try to find in currently open dropdown (if any)
-        if (state.hoveredDropdownSelector) {
-            log(`   🔍 Searching in open dropdown: "${state.hoveredDropdownSelector}"`);
-            const foundInDropdown = await state.page?.evaluate(({ searchText, dropdownSelector }) => {
-                const dropdownEl = document.querySelector(dropdownSelector);
-                if (!dropdownEl)
-                    return null;
-                const allElements = Array.from(dropdownEl.querySelectorAll('*'));
-                for (const el of allElements) {
-                    const elementText = (el.textContent || '').trim();
-                    // STRICT matching: exact match OR partial match with reasonable length
-                    const isExactMatch = elementText.toLowerCase() === searchText.toLowerCase();
-                    const isPartialMatch = elementText.toLowerCase().includes(searchText.toLowerCase()) && elementText.length < 120;
-                    if (isExactMatch || isPartialMatch) {
-                        // Prefer direct clickable elements
-                        if (['A', 'BUTTON', 'LI'].includes(el.tagName)) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.height > 0 && rect.width > 0 && rect.height < 200 && rect.width < 800) {
-                                const event = new MouseEvent('mouseenter', { bubbles: true, cancelable: true });
-                                el.dispatchEvent(event);
-                                console.log(`[HOVER] Found exact element: ${el.tagName}, text="${elementText}"`);
-                                return { success: true, element: el.tagName };
-                            }
-                        }
-                    }
-                }
-                // Second pass: try parent traversal but ONLY 1 level
-                for (const el of allElements) {
-                    const elementText = (el.textContent || '').trim();
-                    const isExactMatch = elementText.toLowerCase() === searchText.toLowerCase();
-                    const isPartialMatch = elementText.toLowerCase().includes(searchText.toLowerCase()) && elementText.length < 120;
-                    if ((isExactMatch || isPartialMatch) && !['A', 'BUTTON', 'LI'].includes(el.tagName)) {
-                        // Try parent only (max 1 level)
-                        let parent = el.parentElement;
-                        if (parent && (['A', 'BUTTON', 'LI', 'DIV'].includes(parent.tagName) ||
-                            ['button', 'menuitem', 'link', 'option'].includes(parent.getAttribute('role') || ''))) {
-                            const rect = parent.getBoundingClientRect();
-                            if (rect.height > 0 && rect.width > 0 && rect.height < 200 && rect.width < 800) {
-                                const event = new MouseEvent('mouseenter', { bubbles: true, cancelable: true });
-                                parent.dispatchEvent(event);
-                                console.log(`[HOVER] Found parent: ${parent.tagName}`);
-                                return { success: true, element: parent.tagName };
-                            }
-                        }
-                    }
-                }
-                return null;
-            }, { searchText: target, dropdownSelector: state.hoveredDropdownSelector });
-            if (foundInDropdown) {
-                log(`   ✅ Successfully hovered over "${target}" in dropdown (${foundInDropdown.element})`);
-                // IMPORTANT: Keep the dropdown selector active for next step
-                await state.page?.waitForTimeout(200);
-                return true;
-            }
-            else {
-                log(`   ⚠️  Not found in dropdown, trying global search...`);
-                // Clear the selector if not found - dropdown might have closed
-                state.hoveredDropdownSelector = undefined;
-            }
-        }
-        // SECOND: Try to find and hover the element using Playwright's locator API
+        // Try Playwright's locator API first
         const locator = state.page?.locator(`button:has-text("${target}"), a:has-text("${target}"), li:has-text("${target}"), [role="button"]:has-text("${target}"), [role="menuitem"]:has-text("${target}")`);
         if (locator) {
             const count = await locator.count().catch(() => 0);
             if (count > 0) {
                 try {
                     await locator.first().hover({ timeout: 5000 });
-                    log(`   ✅ Hovered over "${target}" using Playwright locator`);
+                    log(`   ✅ Successfully hovered over "${target}"`);
                     return true;
                 }
                 catch (e) {
-                    log(`   ⚠️  Playwright hover failed, trying DOM approach...`);
+                    log(`   ⚠️  Playwright hover failed`);
                 }
             }
         }
-        // THIRD: Fallback: Use evaluate to hover via DOM (entire page)
+        // Fallback: Use DOM hover
         const hovered = await state.page?.evaluate(({ searchText }) => {
             const allElements = Array.from(document.querySelectorAll('*'));
-            // FIRST pass: look for exact text matches in direct clickable elements
+            // Look for exact text matches
             for (const el of allElements) {
                 const elementText = (el.textContent || '').trim();
                 if (elementText.toLowerCase() === searchText.toLowerCase()) {
-                    // Try to hover the element itself
                     if (['A', 'BUTTON', 'LI'].includes(el.tagName)) {
                         const rect = el.getBoundingClientRect();
-                        if (rect.height > 0 && rect.width > 0 && rect.height < 200 && rect.width < 800) {
-                            const event = new MouseEvent('mouseenter', { bubbles: true, cancelable: true });
+                        if (rect.height > 0 && rect.width > 0) {
+                            const event = new MouseEvent('mouseenter', { bubbles: true });
                             el.dispatchEvent(event);
                             return true;
                         }
                     }
                 }
             }
-            // SECOND pass: partial matches but strict length check
+            // Partial match with length check
             for (const el of allElements) {
                 const elementText = (el.textContent || '').trim();
                 if (elementText.toLowerCase().includes(searchText.toLowerCase()) && elementText.length < 120) {
-                    // Try to hover the element itself
                     if (['A', 'BUTTON', 'LI'].includes(el.tagName)) {
                         const rect = el.getBoundingClientRect();
-                        if (rect.height > 0 && rect.width > 0 && rect.height < 200 && rect.width < 800) {
-                            const event = new MouseEvent('mouseenter', { bubbles: true, cancelable: true });
+                        if (rect.height > 0 && rect.width > 0) {
+                            const event = new MouseEvent('mouseenter', { bubbles: true });
                             el.dispatchEvent(event);
-                            return true;
-                        }
-                    }
-                    // Try hovering parent only (1 level max)
-                    let parent = el.parentElement;
-                    if (parent && (['A', 'BUTTON', 'LI', 'DIV'].includes(parent.tagName) ||
-                        ['button', 'menuitem', 'link', 'option'].includes(parent.getAttribute('role') || ''))) {
-                        const rect = parent.getBoundingClientRect();
-                        if (rect.height > 0 && rect.width > 0 && rect.height < 200 && rect.width < 800) {
-                            const event = new MouseEvent('mouseenter', { bubbles: true, cancelable: true });
-                            parent.dispatchEvent(event);
                             return true;
                         }
                     }
@@ -4177,154 +3875,6 @@ async function hoverWithRetry(target, maxRetries = 5) {
         }, { searchText: target });
         if (hovered) {
             log(`   ✅ Successfully hovered over "${target}"`);
-            // Set menu context AND find the dropdown container for this menu
-            const menuKeywords = ['Loans', 'Products', 'Services', 'Menu', 'Navigation', 'EMI', 'All Loans', 'Cards', 'Insurance', 'Investments'];
-            const isTopLevelMenu = menuKeywords.some(kw => target.toLowerCase().includes(kw.toLowerCase()));
-            // CRITICAL: If we already have a stored dropdown selector, DON'T try to find a new one
-            // This prevents submenu items from overwriting the parent dropdown context
-            if (state.hoveredDropdownSelector && isTopLevelMenu) {
-                log(`   📌 Top-level menu keyword detected, BUT dropdown already active`);
-                log(`   ↳ Keeping existing dropdown: "${state.hoveredDropdownSelector}"`);
-                log(`   ↳ This item is likely a submenu within the existing dropdown`);
-                return true; // Continue with existing dropdown
-            }
-            if (isTopLevelMenu) {
-                state.activeMenuContext = target;
-                state.activeMenuOpenTime = Date.now();
-                log(`   📌 Menu context set: "${target}"`);
-                // Find and track the dropdown container that appeared after hover
-                try {
-                    const dropdownInfo = await state.page?.evaluate(() => {
-                        console.log('[DROPDOWN-HUNT] Starting comprehensive dropdown search...');
-                        // ===== EXHAUSTIVE APPROACH: Find ANY visible container with menu items =====
-                        const allElements = Array.from(document.querySelectorAll('*'));
-                        // Sort by z-index (higher first) to prioritize overlays
-                        const sortedElements = allElements.sort((a, b) => {
-                            const aZ = parseInt(window.getComputedStyle(a).zIndex) || 0;
-                            const bZ = parseInt(window.getComputedStyle(b).zIndex) || 0;
-                            return bZ - aZ;
-                        });
-                        const candidates = [];
-                        for (const el of sortedElements) {
-                            try {
-                                const htmlEl = el;
-                                const style = window.getComputedStyle(htmlEl);
-                                const rect = htmlEl.getBoundingClientRect();
-                                const opacity = parseFloat(style.opacity);
-                                // Skip invisible elements
-                                if (style.display === 'none' || style.visibility === 'hidden' || opacity < 0.2) {
-                                    continue;
-                                }
-                                // Skip very small or zero-size elements
-                                if (rect.height < 20 || rect.width < 20) {
-                                    continue;
-                                }
-                                // Skip elements too far down the page
-                                if (rect.top > 800 || rect.top < -100) {
-                                    continue;
-                                }
-                                // Check for menu items
-                                const menuItems = htmlEl.querySelectorAll('a, button, li, [role="menuitem"], [role="option"], [role="link"], div[onclick], span[onclick]');
-                                if (menuItems.length >= 2) {
-                                    // This looks like a dropdown/menu container
-                                    const reason = `contains ${menuItems.length} menu items`;
-                                    let selector = '';
-                                    // Try to generate a proper selector
-                                    if (htmlEl.id) {
-                                        selector = `#${htmlEl.id}`;
-                                    }
-                                    else if (htmlEl.className && typeof htmlEl.className === 'string') {
-                                        const classes = htmlEl.className.split(' ').filter(c => c.length > 0 && !c.includes('css-'));
-                                        if (classes.length > 0) {
-                                            selector = `.${classes.join('.')}`;
-                                        }
-                                    }
-                                    // Fallback: use attribute selectors
-                                    if (!selector) {
-                                        const role = htmlEl.getAttribute('role');
-                                        if (role) {
-                                            selector = `[role="${role}"]`;
-                                        }
-                                    }
-                                    // Fallback: use data attributes
-                                    if (!selector) {
-                                        const dataAttrs = Array.from(htmlEl.attributes)
-                                            .filter(attr => attr.name.startsWith('data-'))
-                                            .slice(0, 1);
-                                        if (dataAttrs.length > 0) {
-                                            selector = `[${dataAttrs[0].name}="${dataAttrs[0].value}"]`;
-                                        }
-                                    }
-                                    // Last resort: use type attribute if exists
-                                    if (!selector && htmlEl.getAttribute('type')) {
-                                        selector = `[type="${htmlEl.getAttribute('type')}"]`;
-                                    }
-                                    candidates.push({
-                                        el: htmlEl,
-                                        reason,
-                                        selector: selector || '[generic-menu]',
-                                        rect
-                                    });
-                                    console.log(`[DROPDOWN-HUNT] CANDIDATE #${candidates.length}: selector="${selector}", items=${menuItems.length}, pos=(${Math.round(rect.top)},${Math.round(rect.left)}), z=${style.zIndex}`);
-                                }
-                            }
-                            catch (e) {
-                                // Continue to next element
-                            }
-                        }
-                        // Return the BEST candidate (highest z-index with most menu items)
-                        if (candidates.length > 0) {
-                            // Sort by z-index descending, then by number of menu items
-                            candidates.sort((a, b) => {
-                                const aZ = parseInt(window.getComputedStyle(a.el).zIndex) || 0;
-                                const bZ = parseInt(window.getComputedStyle(b.el).zIndex) || 0;
-                                if (bZ !== aZ)
-                                    return bZ - aZ;
-                                return b.el.querySelectorAll('a, button, li, [role="menuitem"], [role="option"]').length -
-                                    a.el.querySelectorAll('a, button, li, [role="menuitem"], [role="option"]').length;
-                            });
-                            const best = candidates[0];
-                            console.log(`[DROPDOWN-HUNT] SELECTED: ${best.selector}`);
-                            return {
-                                selector: best.selector,
-                                reason: best.reason,
-                                menuItemCount: best.el.querySelectorAll('a, button, li, [role="menuitem"], [role="option"]').length,
-                                position: { top: best.rect.top, left: best.rect.left, width: best.rect.width, height: best.rect.height }
-                            };
-                        }
-                        console.log(`[DROPDOWN-HUNT] NO DROPDOWN FOUND`);
-                        return null;
-                    });
-                    if (dropdownInfo && dropdownInfo.selector) {
-                        state.hoveredDropdownSelector = dropdownInfo.selector;
-                        log(`   🎯 DROPDOWN IDENTIFIED: "${dropdownInfo.selector}"`);
-                        log(`      └─ Position: (${Math.round(dropdownInfo.position.top)},${Math.round(dropdownInfo.position.left)}) | Size: ${Math.round(dropdownInfo.position.width)}x${Math.round(dropdownInfo.position.height)}`);
-                        log(`      └─ Menu items: ${dropdownInfo.menuItemCount}`);
-                        debugLog(`   [DROPDOWN-STORED] selector="${dropdownInfo.selector}", items=${dropdownInfo.menuItemCount}`);
-                    }
-                    else {
-                        log(`   ⚠️  NO DROPDOWN DETECTED - Will rely on element visibility when searching`);
-                        debugLog(`   [DROPDOWN-HUNT] Could not identify dropdown - will search all visible elements`);
-                    }
-                }
-                catch (e) {
-                    log(`   ⚠️  Error during dropdown detection: ${e.message}`);
-                    debugLog(`   [DROPDOWN-ERROR] ${e.message}`);
-                }
-                log(`   ✅ HOVER COMPLETE - Next CLICK will prioritize dropdown`);
-            }
-            else {
-                // This is a submenu item - need to keep parent menu open
-                log(`   📌 Submenu item detected: "${target}"`);
-                if (state.hoveredDropdownSelector) {
-                    log(`   🔄 Submenu within existing dropdown - maintaining context`);
-                    log(`      └─ Current dropdown: "${state.hoveredDropdownSelector}"`);
-                    state.activeMenuOpenTime = Date.now();
-                }
-                else {
-                    log(`   ℹ️  No parent dropdown tracked - will detect on demand`);
-                }
-            }
             return true;
         }
         log(`   ❌ Could not hover over "${target}"`);
@@ -4340,6 +3890,20 @@ async function clickWithRetry(target, maxRetries = 5) {
     await waitForPageReady();
     debugLog(`\n=== CLICK ATTEMPT FOR: "${target}" ===`);
     log(`\n🔍 Searching for: "${target}"`);
+    // ===== CHECK FOR NESTED NAVIGATION (e.g., "Loans > Insta Personal Loan > Check Offer") =====
+    if (target.includes('>')) {
+        const pathSteps = parseNestedPath(target);
+        if (pathSteps.length >= 2) {
+            // Try nested navigation first
+            log(`\n🔄 [NESTED CLICK] Detected nested path with ${pathSteps.length} steps`);
+            const nestedSuccess = await handleNestedNavigation(target);
+            if (nestedSuccess) {
+                await state.page?.waitForTimeout(500);
+                return true;
+            }
+            log(`⚠️ Nested navigation failed, falling back to standard click...`);
+        }
+    }
     // ===== PARSE HIERARCHICAL TARGET (e.g., "Loans > Insta Personal Loan") =====
     let parentMenu = null;
     let actualTarget = target;
@@ -4353,343 +3917,16 @@ async function clickWithRetry(target, maxRetries = 5) {
             log(`      └─ Target Item: "${actualTarget}"`);
         }
     }
-    // If parent menu specified, hover it FIRST
-    if (parentMenu) {
-        log(`   🔄 Pre-hovering parent menu: "${parentMenu}"...`);
-        try {
-            await state.page?.locator(`button:has-text("${parentMenu}"), a:has-text("${parentMenu}")`).first().hover({ timeout: 2000 }).catch(() => { });
-            await state.page?.waitForTimeout(600); // Wait for dropdown animation
-            log(`   ✅ Parent menu hovered and dropdown should be visible`);
-            state.activeMenuContext = parentMenu;
-            state.activeMenuOpenTime = Date.now();
-        }
-        catch (e) {
-            log(`   ⚠️  Could not hover parent: ${e.message}`);
-        }
-    }
-    // **PRIORITY 0 - ABSOLUTE HIGHEST**: Check if a dropdown was recently hovered and use that selector FIRST
-    if (state.hoveredDropdownSelector) {
-        log(`   🎯 [PRIORITY 0] STORED DROPDOWN from recent HOVER - searching WITHIN: "${state.hoveredDropdownSelector}"`);
-        debugLog(`[PRIORITY 0] Searching within stored dropdown selector: "${state.hoveredDropdownSelector}"`);
-        const foundInStoredDropdown = await state.page?.evaluate(({ searchText, dropdownSelector }) => {
-            try {
-                const dropdownEl = document.querySelector(dropdownSelector);
-                if (!dropdownEl) {
-                    console.log(`[STORED-DROPDOWN] Selector not found: ${dropdownSelector}`);
-                    return { found: false, reason: 'selector_not_found' };
-                }
-                const style = window.getComputedStyle(dropdownEl);
-                const rect = dropdownEl.getBoundingClientRect();
-                // Check if dropdown is actually visible
-                if (style.display === 'none' || style.visibility === 'hidden' || rect.height === 0) {
-                    console.log(`[STORED-DROPDOWN] Dropdown not visible`);
-                    return { found: false, reason: 'not_visible' };
-                }
-                const allElements = Array.from(dropdownEl.querySelectorAll('*'));
-                // FIRST pass: exact text match
-                for (const el of allElements) {
-                    const elementText = (el.textContent || '').trim();
-                    const elRect = el.getBoundingClientRect();
-                    if (elementText.length > 0 && elementText.length < 120) {
-                        if (elementText.toLowerCase() === searchText.toLowerCase()) {
-                            console.log(`[STORED-DROPDOWN] ✅ EXACT MATCH "${searchText}" in ${el.tagName}`);
-                            // Try to click the element itself first
-                            if (['A', 'BUTTON', 'LI', 'DIV'].includes(el.tagName) ||
-                                ['button', 'menuitem', 'link', 'option'].includes(el.getAttribute('role') || '')) {
-                                if (elRect.height > 0 && elRect.width > 0 && elRect.height < 200 && elRect.width < 800) {
-                                    el.click();
-                                    console.log(`[STORED-DROPDOWN] Clicked directly`);
-                                    return { found: true, location: 'direct' };
-                                }
-                            }
-                            // Try clickable parent (max 1 level)
-                            let parent = el.parentElement;
-                            if (parent) {
-                                if (['A', 'BUTTON', 'LI', 'DIV'].includes(parent.tagName) ||
-                                    ['button', 'menuitem', 'link', 'option'].includes(parent.getAttribute('role') || '')) {
-                                    const parentRect = parent.getBoundingClientRect();
-                                    if (parentRect.height > 0 && parentRect.width > 0 && parentRect.height < 200 && parentRect.width < 800) {
-                                        parent.click();
-                                        console.log(`[STORED-DROPDOWN] Clicked parent`);
-                                        return { found: true, location: 'parent' };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // SECOND pass: partial match (strict length)
-                for (const el of allElements) {
-                    const elementText = (el.textContent || '').trim();
-                    const elRect = el.getBoundingClientRect();
-                    if (elementText.length > 0 && elementText.length < 120) {
-                        if (elementText.toLowerCase().includes(searchText.toLowerCase())) {
-                            console.log(`[STORED-DROPDOWN] ✅ PARTIAL MATCH "${searchText}" in ${el.tagName}`);
-                            if (['A', 'BUTTON', 'LI', 'DIV'].includes(el.tagName) ||
-                                ['button', 'menuitem', 'link', 'option'].includes(el.getAttribute('role') || '')) {
-                                if (elRect.height > 0 && elRect.width > 0 && elRect.height < 200 && elRect.width < 800) {
-                                    el.click();
-                                    console.log(`[STORED-DROPDOWN] Clicked directly`);
-                                    return { found: true, location: 'direct' };
-                                }
-                            }
-                            let parent = el.parentElement;
-                            if (parent) {
-                                if (['A', 'BUTTON', 'LI', 'DIV'].includes(parent.tagName) ||
-                                    ['button', 'menuitem', 'link', 'option'].includes(parent.getAttribute('role') || '')) {
-                                    const parentRect = parent.getBoundingClientRect();
-                                    if (parentRect.height > 0 && parentRect.width > 0 && parentRect.height < 200 && parentRect.width < 800) {
-                                        parent.click();
-                                        console.log(`[STORED-DROPDOWN] Clicked parent`);
-                                        return { found: true, location: 'parent' };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                console.log(`[STORED-DROPDOWN] Text not found in dropdown`);
-                return { found: false, reason: 'text_not_found' };
-            }
-            catch (e) {
-                console.log(`[STORED-DROPDOWN] Error: ${e.message}`);
-                return { found: false, reason: 'error', error: e.message };
-            }
-        }, { searchText: actualTarget, dropdownSelector: state.hoveredDropdownSelector });
-        if (foundInStoredDropdown?.found) {
-            log(`      ✅ FOUND AND CLICKED in STORED dropdown (${foundInStoredDropdown.location})`);
-            debugLog(`   ✅ FOUND in stored dropdown - Returning TRUE`);
-            // Clear the selector after successful click
-            state.hoveredDropdownSelector = undefined;
-            return true;
-        }
-        else {
-            log(`      ⚠️  Not found in stored dropdown (${foundInStoredDropdown?.reason})`);
-            debugLog(`   ⚠️  Not found in stored dropdown - trying re-hover strategy...`);
-            // CRITICAL: Dropdown was recently hovered but element not found
-            // This means the dropdown might have closed or element is not visible as expected
-            // Try RE-HOVERING the parent menu to bring dropdown back into focus
-            if (state.activeMenuContext) {
-                log(`   🔄 DROPDOWN CONTEXT ACTIVE: Re-hovering "${state.activeMenuContext}" to restore dropdown visibility...`);
-                try {
-                    // Wait before re-hovering
-                    await state.page?.waitForTimeout(200);
-                    // Try to re-hover the parent menu
-                    const reHovered = await state.page?.evaluate(({ menuText }) => {
-                        const allElements = Array.from(document.querySelectorAll('*'));
-                        for (const el of allElements) {
-                            const text = (el.textContent || '').trim();
-                            if (text === menuText || text.toLowerCase() === menuText.toLowerCase()) {
-                                if (['BUTTON', 'A', 'DIV'].includes(el.tagName) ||
-                                    ['button', 'link', 'menuitem'].includes(el.getAttribute('role') || '')) {
-                                    const event = new MouseEvent('mouseenter', { bubbles: true });
-                                    el.dispatchEvent(event);
-                                    console.log(`[RE-HOVER] Re-hovered "${menuText}"`);
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    }, { menuText: state.activeMenuContext });
-                    if (reHovered) {
-                        log(`   ✅ Re-hover successful - waiting for dropdown...`);
-                        await state.page?.waitForTimeout(400);
-                        // Try searching again in the NOW-VISIBLE dropdown
-                        const secondAttempt = await state.page?.evaluate(({ searchText, dropdownSelector }) => {
-                            try {
-                                const dropdownEl = document.querySelector(dropdownSelector);
-                                if (!dropdownEl) {
-                                    console.log(`[REHOVER-ATTEMPT] Dropdown selector still missing`);
-                                    // Try to find ANY visible dropdown
-                                    const allElements = Array.from(document.querySelectorAll('*'));
-                                    for (const el of allElements) {
-                                        const style = window.getComputedStyle(el);
-                                        const rect = el.getBoundingClientRect();
-                                        const menuItems = el.querySelectorAll('a, button, li, [role="menuitem"]');
-                                        if (style.display !== 'none' &&
-                                            style.visibility !== 'hidden' &&
-                                            rect.height > 20 && rect.width > 20 &&
-                                            rect.top < 600 &&
-                                            menuItems.length >= 2) {
-                                            const innerElements = Array.from(el.querySelectorAll('*'));
-                                            for (const inner of innerElements) {
-                                                const innerText = (inner.textContent || '').trim();
-                                                if (innerText.toLowerCase() === searchText.toLowerCase() && innerText.length < 120) {
-                                                    console.log(`[REHOVER-ATTEMPT] ✅ Found via fallback dropdown`);
-                                                    if (['A', 'BUTTON', 'LI'].includes(inner.tagName)) {
-                                                        inner.click();
-                                                        return { found: true, method: 'fallback-dropdown' };
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    return { found: false };
-                                }
-                                const allElements = Array.from(dropdownEl.querySelectorAll('*'));
-                                for (const el of allElements) {
-                                    const elementText = (el.textContent || '').trim();
-                                    if (elementText.length > 0 && elementText.length < 120 &&
-                                        elementText.toLowerCase() === searchText.toLowerCase()) {
-                                        if (['A', 'BUTTON', 'LI'].includes(el.tagName)) {
-                                            el.click();
-                                            console.log(`[REHOVER-ATTEMPT] ✅ Found after re-hover`);
-                                            return { found: true, method: 'exact-match' };
-                                        }
-                                    }
-                                    if (elementText.length > 0 && elementText.length < 120 &&
-                                        elementText.toLowerCase().includes(searchText.toLowerCase())) {
-                                        if (['A', 'BUTTON', 'LI'].includes(el.tagName)) {
-                                            el.click();
-                                            console.log(`[REHOVER-ATTEMPT] ✅ Found via partial match`);
-                                            return { found: true, method: 'partial-match' };
-                                        }
-                                    }
-                                }
-                                return { found: false };
-                            }
-                            catch (e) {
-                                return { found: false };
-                            }
-                        }, { searchText: target, dropdownSelector: state.hoveredDropdownSelector });
-                        if (secondAttempt?.found) {
-                            log(`      ✅ FOUND AND CLICKED after re-hover (${secondAttempt.method})`);
-                            state.hoveredDropdownSelector = undefined;
-                            return true;
-                        }
-                    }
-                }
-                catch (e) {
-                    log(`   ⚠️  Re-hover failed: ${e.message}`);
-                }
-            }
-            // If dropdown context exists but re-hover didn't work, DON'T search main page yet
-            // This prevents clicking on "Notifications" when we're looking for a menu item
-            if (state.activeMenuContext && (Date.now() - (state.activeMenuOpenTime || 0)) < 10000) {
-                log(`   ❌ Dropdown context active but element not found - aborting main page search to prevent false matches`);
-                debugLog(`   [DROPDOWN-FAIL] Dropdown context active but element not found in ${state.activeMenuContext}`);
-                state.hoveredDropdownSelector = undefined;
-                return false; // Don't search main page - this prevents "Notifications" from being found
-            }
-        }
-    }
-    // **PRIORITY 1**: Check for ANY other open dropdowns (detected dynamically)
-    log(`   🎯 [PRIORITY 1] Checking for OTHER open dropdowns...`);
-    debugLog(`[PRIORITY 1] Checking for any detected open dropdowns...`);
-    const inDropdown = await searchInOpenDropdowns(actualTarget);
-    if (inDropdown) {
-        log(`   ✅ Found in detected dropdown - returning TRUE`);
-        debugLog(`[RESULT] ✅ FOUND IN DETECTED DROPDOWN - Returning TRUE`);
-        // Clear stored selector if element was found in a detected dropdown
-        state.hoveredDropdownSelector = undefined;
-        return true;
-    }
-    log(`   ⚠️  Not found in any dropdown - continuing to main page search...`);
-    debugLog(`[PRIORITY 2] No dropdowns found or element not in dropdown. Falling back to main page search...`);
-    // Clear the selector since it's not working
-    state.hoveredDropdownSelector = undefined;
-    // Check if this is a MENU trigger click (like "Loans", "Products", etc.)
-    const menuKeywords = ['Loans', 'Products', 'Services', 'Menu', 'Navigation', 'EMI', 'All Loans', 'Cards', 'Insurance', 'Investments'];
-    const isMenuTrigger = menuKeywords.some(keyword => actualTarget.toLowerCase().includes(keyword.toLowerCase()));
-    if (isMenuTrigger) {
-        log(`   🎯 Menu trigger detected: "${actualTarget}"`);
-    }
-    // ===== NEW STRATEGY: Try to find parent menu and hover it FIRST =====
-    // This ensures dropdown is visible before clicking submenu items
-    log(`   🎯 [NEW STRATEGY] Checking if "${actualTarget}" is a submenu item (needs parent menu hover)`);
-    const parentMenuKeywords = ['Loans', 'Products', 'Services', 'Menu', 'Navigation', 'EMI', 'All Loans', 'Cards', 'Insurance', 'Investments'];
-    let foundParentAndClickedChild = false;
-    for (const parentKeyword of parentMenuKeywords) {
-        try {
-            log(`      ↳ Testing parent: "${parentKeyword}"...`);
-            // Try to find and hover the parent menu
-            await state.page?.locator(`button:has-text("${parentKeyword}"), a:has-text("${parentKeyword}")`).first().hover({ timeout: 2000 }).catch(() => { });
-            // Wait for dropdown to appear
-            await state.page?.waitForTimeout(500);
-            // Now try to find target within visible dropdowns
-            const foundInDropdown = await searchInOpenDropdowns(actualTarget);
-            if (foundInDropdown) {
-                log(`      ✅ Found "${actualTarget}" in dropdown after hovering "${parentKeyword}"`);
-                state.activeMenuContext = parentKeyword;
-                state.activeMenuOpenTime = Date.now();
-                foundParentAndClickedChild = true;
-                break;
-            }
-        }
-        catch (e) {
-            // Try next parent keyword
-        }
-    }
-    if (foundParentAndClickedChild) {
-        state.activeMenuContext = undefined;
-        return true;
-    }
-    // Check if this is a submenu item and we recently clicked a menu (within last 5 seconds)
-    const isLikelySubmenuItem = state.activeMenuContext &&
-        state.activeMenuOpenTime &&
-        (Date.now() - state.activeMenuOpenTime) < 5000;
-    if (isLikelySubmenuItem) {
-        log(`   🎯 Submenu item context: "${actualTarget}" (parent menu: "${state.activeMenuContext}")`);
-        // Re-hover the parent menu to keep it open while we search
-        const parentMenuKeywords = [state.activeMenuContext, 'Loans', 'Products', 'Services', 'Cards', 'Insurance'];
-        for (const keyword of parentMenuKeywords) {
-            try {
-                log(`      ↳ Re-hovering "${keyword}" to keep menu visible...`);
-                await state.page?.locator(`button:has-text("${keyword}"), a:has-text("${keyword}")`).first().hover({ timeout: 3000 }).catch(() => { });
-                await state.page?.waitForTimeout(300);
-                // Try dropdown search again after hover
-                const foundAfterHover = await searchInOpenDropdowns(actualTarget);
-                if (foundAfterHover)
-                    return true;
-                break;
-            }
-            catch (e) {
-                // Continue to next keyword
-            }
-        }
-        // Try nested menu handler with menu context active
-        const nestedResult = await handleNestedMenuItemWithContext(actualTarget, state.activeMenuContext);
-        if (nestedResult) {
-            state.activeMenuContext = undefined;
-            return true;
-        }
-    }
-    // Search all windows/frames/iframes
+    // ===== SIMPLE DIRECT SEARCH: No dropdown logic, just find and click =====
+    log(`   ⚡ Attempting to find and click element...`);
     const mainPageResult = await searchInAllFrames(actualTarget, 'click');
     if (mainPageResult) {
-        // If this was a menu trigger, set the context for next searches
-        if (isMenuTrigger) {
-            state.activeMenuContext = actualTarget;
-            state.activeMenuOpenTime = Date.now();
-            log(`   📌 Menu opened - next search will check dropdown first`);
-        }
-        else {
-            state.activeMenuContext = undefined;
-        }
+        log(`   ✅ Element found and clicked`);
         return true;
     }
-    // **NESTED MENU CHECK**: Try nested menu handling if direct search fails
-    const nestedMenuResult = await handleNestedMenuItem(actualTarget);
-    if (nestedMenuResult) {
-        if (isMenuTrigger) {
-            state.activeMenuContext = actualTarget;
-            state.activeMenuOpenTime = Date.now();
-        }
-        else {
-            state.activeMenuContext = undefined;
-        }
-        return true;
-    }
-    // Try advanced fallback search
+    // Try advanced fallback search if main search failed
     const advancedResult = await advancedElementSearch(actualTarget, 'click', undefined, 2);
     if (advancedResult) {
-        if (isMenuTrigger) {
-            state.activeMenuContext = actualTarget;
-            state.activeMenuOpenTime = Date.now();
-        }
-        else {
-            state.activeMenuContext = undefined;
-        }
         return true;
     }
     // Search subwindows with equal priority
@@ -4698,13 +3935,18 @@ async function clickWithRetry(target, maxRetries = 5) {
             const foundInPriorityWindow = await searchInAllSubwindows(actualTarget, 'click');
             if (foundInPriorityWindow) {
                 log(`✅ Successfully clicked in subwindow!`);
-                if (isMenuTrigger) {
-                    state.activeMenuContext = actualTarget;
-                    state.activeMenuOpenTime = Date.now();
-                }
-                else {
-                    state.activeMenuContext = undefined;
-                }
+                return true;
+            }
+        }
+        catch (e) {
+            log(`Subwindow search failed, continuing...`);
+        }
+    }
+    if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
+        try {
+            const foundInPriorityWindow = await searchInAllSubwindows(actualTarget, 'click');
+            if (foundInPriorityWindow) {
+                log(`✅ Successfully clicked in subwindow!`);
                 return true;
             }
         }
@@ -5493,68 +4735,8 @@ async function fillWithRetry(target, value, maxRetries = 5) {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
     log(`\n🔽 [FILL-REQUEST] Attempting to fill: "${target}" = "${value}"`);
-    // **PRIORITY 0 - STORED DROPDOWN**: Check if a dropdown was recently hovered
-    if (state.hoveredDropdownSelector) {
-        log(`   🎯 [STORED DROPDOWN] Checking dropdown from recent HOVER: "${state.hoveredDropdownSelector}"`);
-        const foundInStoredDropdown = await state.page?.evaluate(({ searchText, value: fillValue, dropdownSelector }) => {
-            try {
-                const dropdownEl = document.querySelector(dropdownSelector);
-                if (!dropdownEl)
-                    return { found: false };
-                const style = window.getComputedStyle(dropdownEl);
-                if (style.display === 'none' || style.visibility === 'hidden')
-                    return { found: false };
-                // Look for select, input, or clickable items in this dropdown
-                const selects = dropdownEl.querySelectorAll('select');
-                for (const select of Array.from(selects)) {
-                    const options = select.querySelectorAll('option');
-                    for (const option of Array.from(options)) {
-                        if (option.textContent?.toLowerCase().includes(searchText.toLowerCase()) ||
-                            option.value.toLowerCase().includes(searchText.toLowerCase())) {
-                            select.value = option.value;
-                            select.dispatchEvent(new Event('change', { bubbles: true }));
-                            return { found: true, type: 'select' };
-                        }
-                    }
-                }
-                // Check for input fields in dropdown
-                const inputs = dropdownEl.querySelectorAll('input, textarea');
-                for (const input of Array.from(inputs)) {
-                    const placeholder = input.placeholder || '';
-                    const label = input.getAttribute('aria-label') || '';
-                    if (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
-                        label.toLowerCase().includes(searchText.toLowerCase())) {
-                        input.value = fillValue;
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                        return { found: true, type: 'input' };
-                    }
-                }
-                return { found: false };
-            }
-            catch (e) {
-                return { found: false };
-            }
-        }, { searchText: target, value, dropdownSelector: state.hoveredDropdownSelector });
-        if (foundInStoredDropdown?.found) {
-            log(`      ✅ FILLED in stored dropdown (type: ${foundInStoredDropdown.type})`);
-            state.hoveredDropdownSelector = undefined;
-            return true;
-        }
-    }
-    // PRIORITY 1: Check for dropdown/select elements
-    log(`   🎯 [PRIORITY 1] Checking if target is a dropdown/select element...`);
-    const dropdownHandled = await detectAndHandleDropdown(target, value);
-    if (dropdownHandled) {
-        log(`✅ [FILL-SUCCESS] Dropdown handling succeeded for: "${target}" = "${value}"`);
-        state.hoveredDropdownSelector = undefined;
-        return true;
-    }
-    // Clear stored selector if not found
-    state.hoveredDropdownSelector = undefined;
-    // Search all windows/frames/iframes with EQUAL PRIORITY
-    // No special priority for overlays - search everything uniformly
-    log(`\n🔍 Searching for regular field: "${target}"`);
+    // Search all windows/frames/iframes
+    log(`\n🔍 Searching for field: "${target}"`);
     const mainPageResult = await searchInAllFrames(target, 'fill', value);
     if (mainPageResult) {
         return true;
@@ -5564,7 +4746,7 @@ async function fillWithRetry(target, value, maxRetries = 5) {
     if (advancedResult) {
         return true;
     }
-    // Search subwindows with equal priority
+    // Search subwindows
     if (allPages.length > 1 && latestSubwindow && !latestSubwindow.isClosed()) {
         try {
             const foundInPriorityWindow = await searchInAllSubwindows(target, 'fill', value);
@@ -5574,297 +4756,8 @@ async function fillWithRetry(target, value, maxRetries = 5) {
             }
         }
         catch (e) {
-            log(`Subwindow search failed, continuing...`);
+            log(`Subwindow search failed`);
         }
-    }
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        // Check pause at start of each retry attempt
-        if (state.isPaused) {
-            while (state.isPaused && !state.isStopped) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-            if (state.isStopped)
-                return false;
-        }
-        try {
-            // Check if page is still valid before attempting
-            if (!state.page || state.page.isClosed()) {
-                log(`Page closed during fill attempt, recovering...`);
-                await switchToLatestPage();
-                if (!state.page || state.page.isClosed()) {
-                    return false;
-                }
-            }
-            // Strategy 0: Direct selector fill (if target is a CSS selector)
-            if (target.startsWith('[') || target.startsWith('#') || target.startsWith('.') || target.includes('>')) {
-                try {
-                    await state.page?.fill(target, value, { timeout: 2000 });
-                    return true;
-                }
-                catch (e0) {
-                    // Direct selector failed
-                }
-            }
-            // Strategy 0.5: Find visible input in modals/overlays
-            try {
-                const filled = await state.page?.evaluate(({ searchText, value: fillValue }) => {
-                    const allInputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
-                    for (const input of Array.from(allInputs)) {
-                        const el = input;
-                        const style = window.getComputedStyle(el);
-                        const placeholder = input.placeholder || '';
-                        const label = input.getAttribute('aria-label') || '';
-                        const id = input.id || '';
-                        const name = input.name || '';
-                        // Check if visible and matches search text
-                        if (style.display !== 'none' && style.visibility !== 'hidden' &&
-                            (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
-                                label.toLowerCase().includes(searchText.toLowerCase()) ||
-                                id.toLowerCase().includes(searchText.toLowerCase()) ||
-                                name.toLowerCase().includes(searchText.toLowerCase()))) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) {
-                                // ONLY scroll if element is outside viewport
-                                if (rect.top < 0 || rect.bottom > window.innerHeight) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                }
-                                input.value = fillValue;
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
-                                input.dispatchEvent(new Event('blur', { bubbles: true }));
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                }, { searchText: target, value });
-                if (filled) {
-                    return true;
-                }
-            }
-            catch (e0) {
-                // Modal input search failed
-            }
-            // Strategy 1: Fill in iframes FIRST (most important)
-            try {
-                const filledInIframe = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    const iframes = document.querySelectorAll('iframe');
-                    for (const iframe of Array.from(iframes)) {
-                        try {
-                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-                            if (iframeDoc) {
-                                const inputs = iframeDoc.querySelectorAll('input, textarea');
-                                for (const input of inputs) {
-                                    const placeholder = input.placeholder || '';
-                                    const label = input.getAttribute('aria-label') || '';
-                                    const id = input.id || '';
-                                    const name = input.name || '';
-                                    const value = input.value || '';
-                                    if (placeholder.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        label.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        id.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        name.toLowerCase().includes(searchText.toLowerCase()) ||
-                                        value.toLowerCase().includes(searchText.toLowerCase())) {
-                                        input.focus();
-                                        input.value = fillValue;
-                                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                                        input.dispatchEvent(new Event('blur', { bubbles: true }));
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        catch (e) {
-                            // Cross-origin iframe
-                        }
-                    }
-                    return false;
-                }, { searchText: target, fillValue: value });
-                if (filledInIframe) {
-                    await state.page?.waitForTimeout(200);
-                    return true;
-                }
-            }
-            catch (e5) {
-                // Iframe fill attempt failed
-            }
-            // Strategy 2: Find by text pattern and fill any input
-            try {
-                const foundAndFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    // Search for any element containing the text
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of Array.from(allElements)) {
-                        const text = el.textContent || '';
-                        if (text.toLowerCase().includes(searchText.toLowerCase())) {
-                            // Look for nearby input
-                            const inputs = el.querySelectorAll('input, textarea');
-                            if (inputs.length > 0) {
-                                const input = inputs[0];
-                                input.value = fillValue;
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
-                                return true;
-                            }
-                            // Check parent for input
-                            let parent = el.parentElement;
-                            for (let i = 0; i < 5; i++) {
-                                if (!parent)
-                                    break;
-                                const parentInputs = parent.querySelectorAll('input, textarea');
-                                if (parentInputs.length > 0) {
-                                    const input = parentInputs[0];
-                                    input.value = fillValue;
-                                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                                    return true;
-                                }
-                                parent = parent.parentElement;
-                            }
-                        }
-                    }
-                    return false;
-                }, { searchText: target, fillValue: value });
-                if (foundAndFilled) {
-                    log(`Filled by pattern matching`);
-                    return true;
-                }
-            }
-            catch (e1) {
-                log(`Pattern matching fill failed`);
-            }
-            // Strategy 3: Scroll and direct fill
-            try {
-                log(`Scrolling to field...`);
-                await scrollToElement(target);
-                await state.page?.fill(target, value, { timeout: 3000 });
-                log(`Successfully filled via scroll`);
-                return true;
-            }
-            catch (e2) {
-                log(`Direct fill failed`);
-            }
-            // Strategy 4: Clear, type with scrolling
-            try {
-                log(`Clear and type with scroll...`);
-                await scrollToElement(target);
-                await state.page?.click(target, { timeout: 2000 });
-                await state.page?.keyboard.press('Control+A');
-                await state.page?.keyboard.press('Delete');
-                await state.page?.type(target, value, { delay: 50 });
-                log(`Filled using clear and type`);
-                return true;
-            }
-            catch (e3) {
-                log(`Clear and type failed`);
-            }
-            // Strategy 5: Shadow DOM fill
-            try {
-                log(`Searching in Shadow DOM to fill...`);
-                const shadowFilled = await state.page?.evaluate(({ searchText, fillValue }) => {
-                    const walk = (node) => {
-                        if (node.nodeType === 1) { // Element node
-                            const el = node;
-                            const placeholder = el.placeholder || '';
-                            const ariaLabel = el.getAttribute('aria-label') || '';
-                            if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') &&
-                                (placeholder.toLowerCase().includes(searchText.toLowerCase()) || ariaLabel.toLowerCase().includes(searchText.toLowerCase()))) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    el.value = fillValue;
-                                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                                    return true;
-                                }
-                            }
-                            // Check shadow root
-                            if (el.shadowRoot && walk(el.shadowRoot))
-                                return true;
-                        }
-                        // Walk children
-                        for (let child of node.childNodes) {
-                            if (walk(child))
-                                return true;
-                        }
-                        return false;
-                    };
-                    return walk(document);
-                }, { searchText: target, fillValue: value });
-                if (shadowFilled) {
-                    log(`Filled field in Shadow DOM`);
-                    return true;
-                }
-            }
-            catch (e4) {
-                log(`Shadow DOM fill failed`);
-            }
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(500); // Reduced wait between retries
-            }
-        }
-        catch (error) {
-            if (attempt < maxRetries) {
-                await state.page?.waitForTimeout(500); // Reduced wait between retries
-            }
-        }
-    }
-    // Final fallback: Check if there are open subwindows
-    if (allPages.length > 1) {
-        try {
-            log(`Field not found in main window, searching subwindows...`);
-            const foundInSubwindow = await searchInAllSubwindows(target, 'fill', value);
-            if (foundInSubwindow) {
-                log(`Successfully filled in subwindow`);
-                return true;
-            }
-        }
-        catch (swError) {
-            log(`Subwindow fill search failed`);
-        }
-    }
-    // FILL FAILED - Provide diagnostic information
-    log(`\n❌ [FILL FAILED] Unable to find or fill field: "${target}" with value: "${value}"`);
-    try {
-        // Diagnostic: Check if input field exists
-        const fieldExists = await state.page?.evaluate((searchText) => {
-            const lower = searchText.toLowerCase();
-            const inputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
-            for (const input of Array.from(inputs)) {
-                const placeholder = input.placeholder || '';
-                const label = input.getAttribute('aria-label') || '';
-                const name = input.name || '';
-                const id = input.id || '';
-                const allAttrs = `${placeholder} ${label} ${name} ${id}`.toLowerCase();
-                if (allAttrs.includes(lower)) {
-                    const style = window.getComputedStyle(input);
-                    return {
-                        found: true,
-                        attributes: { placeholder, name, id, label },
-                        visible: style.display !== 'none' && style.visibility !== 'hidden',
-                        type: input.type,
-                        value: input.value
-                    };
-                }
-            }
-            return { found: false, attributes: {}, visible: false, type: '', value: '' };
-        }, target);
-        if (fieldExists?.found) {
-            if (!fieldExists.visible) {
-                log(`   ⚠️  Field FOUND but HIDDEN | Type: ${fieldExists.type} | Placeholder: "${fieldExists.attributes.placeholder}"`);
-            }
-            else {
-                log(`   ⚠️  Field FOUND and VISIBLE | Type: ${fieldExists.type} | Current Value: "${fieldExists.value}"`);
-                log(`   → Try using a different field identifier or check field attributes`);
-            }
-        }
-        else {
-            log(`   ⚠️  Field NOT FOUND on page`);
-            log(`   → Search for field with label: "${target}"`);
-        }
-    }
-    catch (diagErr) {
-        log(`   ℹ️  Diagnostic check failed: ${diagErr}`);
     }
     return false;
 }
@@ -6580,6 +5473,324 @@ async function getAllPageElements() {
     }
 }
 /* ============== INTELLIGENT PAGE READINESS ============== */
+/* ============== SMART NESTED DROPDOWN NAVIGATION ============== */
+/**
+ * Detect all visible dropdown/menu containers on the current page
+ * Returns array of visible dropdowns with their items
+ */
+async function detectVisibleDropdowns() {
+    if (!state.page || state.page.isClosed())
+        return [];
+    try {
+        const dropdowns = await state.page.evaluate(() => {
+            const results = [];
+            const seen = new Set();
+            // Selectors for dropdown containers
+            const dropdownSelectors = [
+                '[role="menu"]',
+                '[role="listbox"]',
+                '[role="combobox"]',
+                '.dropdown',
+                '.menu',
+                '.select',
+                '[class*="dropdown"]',
+                '[class*="menu"]',
+                '[class*="popup"]',
+                '[data-role="dropdown"]',
+                'ul[class*="dropdown"]',
+                'ul[class*="menu"]',
+                'div[class*="dropdown-menu"]',
+                '.nav',
+                '[class*="navigation"]'
+            ];
+            for (const selector of dropdownSelectors) {
+                try {
+                    const elements = document.querySelectorAll(selector);
+                    for (const el of Array.from(elements)) {
+                        // Skip if already processed
+                        if (seen.has(el))
+                            continue;
+                        const style = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        // Check if actually visible
+                        const isVisible = style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            parseFloat(style.opacity) > 0.1 &&
+                            rect.height > 0 && rect.width > 0;
+                        if (!isVisible)
+                            continue;
+                        // Get all clickable items within this dropdown
+                        const items = [];
+                        const itemElements = el.querySelectorAll('a, button, [role="option"], [role="menuitem"], li, span[onclick], div[onclick]');
+                        for (const item of Array.from(itemElements)) {
+                            const itemStyle = window.getComputedStyle(item);
+                            const itemVisible = itemStyle.display !== 'none' && itemStyle.visibility !== 'hidden';
+                            if (itemVisible) {
+                                items.push({
+                                    text: (item.textContent || '').trim().substring(0, 100),
+                                    tag: item.tagName,
+                                    role: item.getAttribute('role'),
+                                    id: item.id,
+                                    class: item.className
+                                });
+                            }
+                        }
+                        if (items.length > 0) {
+                            results.push({
+                                selector: selector,
+                                position: { top: Math.round(rect.top), left: Math.round(rect.left) },
+                                size: { width: Math.round(rect.width), height: Math.round(rect.height) },
+                                itemCount: items.length,
+                                items: items
+                            });
+                            seen.add(el);
+                        }
+                    }
+                }
+                catch (e) {
+                    // Skip invalid selectors
+                }
+            }
+            return results;
+        });
+        return dropdowns;
+    }
+    catch (e) {
+        log(`Failed to detect dropdowns: ${e}`);
+        return [];
+    }
+}
+/**
+ * Parse nested target path like "Loans > Insta Personal Loan > Check Offer"
+ * Returns array of breadcrumb steps
+ */
+function parseNestedPath(target) {
+    return target
+        .split('>')
+        .map(step => step.trim())
+        .filter(step => step.length > 0);
+}
+/**
+ * Handle nested dropdown navigation
+ * Example: "Loans > Insta Personal Loan > Check Offer"
+ * 1. Click "Loans" (parent opens dropdown)
+ 2. Detect dropdown opened
+ 3. Click "Insta Personal Loan" inside dropdown
+ 4. Repeat for "Check Offer"
+ */
+async function handleNestedNavigation(target) {
+    const pathSteps = parseNestedPath(target);
+    if (pathSteps.length <= 1) {
+        // Not a nested path, use regular click
+        return false; // Let caller handle with regular click
+    }
+    log(`\n🔄 [NESTED NAVIGATION] Handling hierarchical path: ${pathSteps.join(' → ')}`);
+    try {
+        for (let i = 0; i < pathSteps.length; i++) {
+            const currentStep = pathSteps[i];
+            const isLastStep = i === pathSteps.length - 1;
+            log(`\n📍 Step ${i + 1}/${pathSteps.length}: Click "${currentStep}"`);
+            // STEP 1: Click the current element
+            let clickSuccess = false;
+            if (i === 0) {
+                // First click - search entire page
+                clickSuccess = await clickElementInPage(currentStep, state.page);
+            }
+            else {
+                // Subsequent clicks - search within visible dropdowns
+                const dropdowns = await detectVisibleDropdowns();
+                if (dropdowns.length === 0) {
+                    log(`⚠️ No visible dropdowns found after clicking "${pathSteps[i - 1]}"`);
+                    return false;
+                }
+                log(`✅ Found ${dropdowns.length} visible dropdown(s), searching within them...`);
+                // Search for element within the dropdown items
+                clickSuccess = await clickElementInDropdown(currentStep, dropdowns);
+            }
+            if (!clickSuccess) {
+                log(`❌ Failed to click "${currentStep}" at step ${i + 1}`);
+                return false;
+            }
+            log(`✅ Clicked "${currentStep}"`);
+            if (!isLastStep) {
+                // Wait for next dropdown to open
+                log(`⏳ Waiting for dropdown to expand...`);
+                await state.page.waitForTimeout(800);
+                // Verify dropdown opened
+                const dropsAfter = await detectVisibleDropdowns();
+                if (dropsAfter.length === 0) {
+                    log(`⚠️ Warning: No dropdown visible after clicking "${currentStep}"`);
+                    // Try one more time with extra wait
+                    await state.page.waitForTimeout(500);
+                    const dropsRetry = await detectVisibleDropdowns();
+                    if (dropsRetry.length > 0) {
+                        log(`✅ Dropdown found after retry`);
+                    }
+                }
+                else {
+                    const itemsInDropdown = dropsAfter.reduce((sum, d) => sum + d.itemCount, 0);
+                    log(`✅ Dropdown opened with ${itemsInDropdown} visible items`);
+                }
+            }
+        }
+        log(`\n✅ [NESTED NAVIGATION SUCCESS] Successfully navigated through: ${target}`);
+        return true;
+    }
+    catch (e) {
+        log(`\n❌ [NESTED NAVIGATION ERROR] ${e.message}`);
+        return false;
+    }
+}
+/**
+ * Click element by text within the entire page
+ */
+async function clickElementInPage(text, page) {
+    try {
+        const foundElement = await page.evaluate((searchText) => {
+            const lower = searchText.toLowerCase().trim();
+            let bestMatch = null;
+            let bestMatchLength = Infinity;
+            const elements = Array.from(document.querySelectorAll('a, button, [role="button"], [role="menuitem"], [role="option"], li, div, span'));
+            for (const el of elements) {
+                const elText = (el.textContent || '').trim().toLowerCase();
+                const rect = el.getBoundingClientRect();
+                // Check visibility
+                const style = window.getComputedStyle(el);
+                const isVisible = style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    parseFloat(style.opacity) > 0.1 &&
+                    rect.height > 0 && rect.width > 0;
+                if (!isVisible)
+                    continue;
+                // Exact match
+                if (elText === lower) {
+                    bestMatch = {
+                        text: elText,
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2)
+                    };
+                    break;
+                }
+                // Partial match - keep shortest
+                else if (elText.includes(lower) && elText.length < bestMatchLength) {
+                    bestMatch = {
+                        text: elText,
+                        x: Math.round(rect.left + rect.width / 2),
+                        y: Math.round(rect.top + rect.height / 2)
+                    };
+                    bestMatchLength = elText.length;
+                }
+            }
+            return bestMatch;
+        }, text);
+        if (!foundElement) {
+            return false;
+        }
+        // Click using Playwright mouse - most reliable
+        await page.mouse.click(foundElement.x, foundElement.y);
+        return true;
+    }
+    catch (e) {
+        return false;
+    }
+}
+/**
+ * Click element by text within visible dropdowns
+ * Uses Playwright's native click for reliability
+ */
+async function clickElementInDropdown(text, dropdowns) {
+    if (!state.page || state.page.isClosed())
+        return false;
+    try {
+        const lower = text.toLowerCase();
+        log(`   🔍 Searching for "${text}" on entire page (any dropdown or element)...`);
+        // Simple strategy: Find element with matching text anywhere on page and click it using Playwright
+        const foundElement = await state.page.evaluate((searchText) => {
+            const lower = searchText.toLowerCase().trim();
+            let bestMatch = null;
+            let bestMatchLength = Infinity;
+            // Search all elements
+            const allElements = document.querySelectorAll('*');
+            for (const el of Array.from(allElements)) {
+                const elText = (el.textContent || '').trim().toLowerCase();
+                const rect = el.getBoundingClientRect();
+                // Must be visible
+                const style = window.getComputedStyle(el);
+                const isVisible = style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    parseFloat(style.opacity) > 0.1 &&
+                    rect.height > 0 && rect.width > 0;
+                if (!isVisible)
+                    continue;
+                // Exact match - prioritize clickable elements (a, button, etc.)
+                if (elText === lower) {
+                    const isClickable = ['A', 'BUTTON', 'LI', 'SPAN', 'DIV'].includes(el.tagName) ||
+                        el.getAttribute('role')?.includes('button') ||
+                        el.getAttribute('role')?.includes('menuitem') ||
+                        el.getAttribute('onclick') !== null;
+                    if (isClickable) {
+                        bestMatch = {
+                            text: elText,
+                            x: Math.round(rect.left + rect.width / 2),
+                            y: Math.round(rect.top + rect.height / 2),
+                            tag: el.tagName,
+                            isExact: true
+                        };
+                        break; // Found exact match, stop
+                    }
+                }
+                // Partial match - keep shortest match
+                else if (elText.includes(lower) && elText.length < bestMatchLength) {
+                    const rect2 = el.getBoundingClientRect();
+                    bestMatch = {
+                        text: elText,
+                        x: Math.round(rect2.left + rect2.width / 2),
+                        y: Math.round(rect2.top + rect2.height / 2),
+                        tag: el.tagName,
+                        isExact: false
+                    };
+                    bestMatchLength = elText.length;
+                }
+            }
+            return bestMatch;
+        }, text);
+        if (!foundElement) {
+            log(`   ❌ Could not find element with text "${text}" on page`);
+            return false;
+        }
+        log(`   ✅ Found element: "${foundElement.text.substring(0, 60)}" (${foundElement.tag}) at (${foundElement.x}, ${foundElement.y})`);
+        log(`   🖱️  Clicking at coordinates (${foundElement.x}, ${foundElement.y})...`);
+        // Click using Playwright at the exact coordinates - most reliable method
+        try {
+            await state.page.mouse.click(foundElement.x, foundElement.y);
+            log(`   ✅ Successfully clicked element`);
+            return true;
+        }
+        catch (e) {
+            log(`   ⚠️ Mouse click failed, trying alternative method...`);
+            // Fallback: interact with element via keyboard/focus
+            try {
+                await state.page.evaluate((coords) => {
+                    const el = document.elementFromPoint(coords.x, coords.y);
+                    if (el) {
+                        el.focus();
+                        el.click();
+                    }
+                }, { x: foundElement.x, y: foundElement.y });
+                log(`   ✅ Alternative click succeeded`);
+                return true;
+            }
+            catch (e2) {
+                log(`   ❌ All click methods failed: ${e2}`);
+                return false;
+            }
+        }
+    }
+    catch (e) {
+        log(`   ❌ Error: ${e.message}`);
+        return false;
+    }
+}
 /**
  * Comprehensive page readiness check
  * Waits for page to be fully loaded using multiple strategies
