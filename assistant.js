@@ -186,12 +186,15 @@ function log(message) {
 /**
  * Log step execution with bold formatting for easy identification
  */
-function logStep(stepId, action, target, windowInfo = '') {
+function logStep(stepId, action, target, data = '', windowInfo = '') {
     const separator = '═'.repeat(100);
-    const stepMessage = `STEP: ${stepId.toUpperCase()} | ACTION: ${action.toUpperCase()} | TARGET: "${target}"`;
-    const fullMessage = windowInfo ? `${stepMessage} | ${windowInfo}` : stepMessage;
+    const dataStr = data ? ` | DATA: "${data}"` : '';
+    const stepMessage = `STEP: ${stepId.toUpperCase()} | ACTION: ${action.toUpperCase()} | TARGET: "${target}"${dataStr}`;
     log(`\n${'█'.repeat(110)}`);
-    log(`█ ⚡ ${fullMessage}`);
+    log(`█ ⚡ ${stepMessage}`);
+    if (windowInfo) {
+        log(`█    Window: ${windowInfo}`);
+    }
     log(`${'█'.repeat(110)}\n`);
 }
 /**
@@ -404,13 +407,12 @@ async function logWindowAndFrameInfo() {
         // Get iframe names
         const iframes = await state.page.locator('iframe').all();
         if (iframes.length > 0) {
-            const iframeNames = [];
+            log(`   📊 Available iframes:`);
             for (const iframe of iframes) {
                 const name = await iframe.getAttribute('name').catch(() => 'unnamed');
                 const id = await iframe.getAttribute('id').catch(() => 'no-id');
-                iframeNames.push(`${name || 'unnamed'} (id: ${id || 'no-id'})`);
+                log(`      ├─ ${name || 'unnamed'} (id: ${id || 'no-id'})`);
             }
-            log(`   📊 Available iframes: ${iframeNames.join(' | ')}`);
         }
     }
     catch (e) {
@@ -4887,9 +4889,39 @@ async function clickWithRetry(target, maxRetries = 5) {
                 }
                 parent = parent.parentElement;
             }
+            // Calculate exactness score for better matching
+            let exactnessScore = 0;
+            // Exact match = 1000 points
+            if (cleanText === searchTarget || cleanInner === searchTarget) {
+                exactnessScore += 1000;
+            }
+            // Starts with search term = 500 points
+            else if (cleanText.startsWith(searchTarget) || cleanInner.startsWith(searchTarget)) {
+                exactnessScore += 500;
+            }
+            // Ends with search term = 300 points
+            else if (cleanText.endsWith(searchTarget) || cleanInner.endsWith(searchTarget)) {
+                exactnessScore += 300;
+            }
+            // Contains whole words (word boundary match) = 200 points
+            else {
+                const words = searchTarget.split(/\s+/);
+                let wordMatches = 0;
+                for (const word of words) {
+                    const regex = new RegExp('\\b' + word + '\\b');
+                    if (regex.test(cleanText) || regex.test(cleanInner)) {
+                        wordMatches++;
+                    }
+                }
+                exactnessScore += wordMatches * 100;
+            }
+            // Prefer shorter text length (closer to actual search term length)
+            const textLength = cleanText.length;
+            const lengthPenalty = Math.abs(textLength - searchTarget.length) * 2;
+            exactnessScore -= lengthPenalty;
             debugCount++;
             if (debugCount <= 15) {
-                console.log(`   Match #${debugCount}: <${el.tagName}> viewport=${isInViewport} depth=${dropdownDepth} text="${fullText.substring(0, 40)}"`);
+                console.log(`   Match #${debugCount}: <${el.tagName}> viewport=${isInViewport} depth=${dropdownDepth} score=${exactnessScore} text="${fullText.substring(0, 40)}"`);
             }
             candidates.push({
                 el: el,
@@ -4898,7 +4930,8 @@ async function clickWithRetry(target, maxRetries = 5) {
                 dropdownDepth: dropdownDepth,
                 size: rect.width * rect.height,
                 rect: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
-                isInViewport: isInViewport
+                isInViewport: isInViewport,
+                exactnessScore: exactnessScore
             });
         }
         console.log(`   ✅ Found ${candidates.length} candidates`);
@@ -4910,14 +4943,16 @@ async function clickWithRetry(target, maxRetries = 5) {
         const visibleCandidates = candidates.filter(c => c.isInViewport);
         console.log(`   📺 Visible in viewport: ${visibleCandidates.length}`);
         let toClick = visibleCandidates.length > 0 ? visibleCandidates : candidates;
-        // Sort: prefer deeper dropdown nesting, then by size
+        // Sort: prefer exactness score, then deeper dropdown nesting, then by size
         toClick.sort((a, b) => {
+            if (b.exactnessScore !== a.exactnessScore)
+                return b.exactnessScore - a.exactnessScore;
             if (b.dropdownDepth !== a.dropdownDepth)
                 return b.dropdownDepth - a.dropdownDepth;
             return b.size - a.size;
         });
         const selectedElement = toClick[0];
-        console.log(`   ✅ SELECTED: <${selectedElement.tag}> inViewport=${selectedElement.isInViewport} depth=${selectedElement.dropdownDepth} text="${selectedElement.text}" pos=(${selectedElement.rect.x},${selectedElement.rect.y})`);
+        console.log(`   ✅ SELECTED: <${selectedElement.tag}> inViewport=${selectedElement.isInViewport} depth=${selectedElement.dropdownDepth} score=${selectedElement.exactnessScore} text="${selectedElement.text}" pos=(${selectedElement.rect.x},${selectedElement.rect.y})`);
         selectedElement.el.click();
         return {
             found: true,
@@ -4925,7 +4960,8 @@ async function clickWithRetry(target, maxRetries = 5) {
             text: selectedElement.text,
             depth: selectedElement.dropdownDepth,
             inViewport: selectedElement.isInViewport,
-            position: selectedElement.rect
+            position: selectedElement.rect,
+            exactnessScore: selectedElement.exactnessScore
         };
     }, target).catch((err) => {
         console.log(`   ❌ EVALUATE ERROR: ${err}`);
@@ -4937,6 +4973,7 @@ async function clickWithRetry(target, maxRetries = 5) {
         log(`   Text: "${dropdownResult.text}"`);
         log(`   Visible in viewport: ${dropdownResult.inViewport}`);
         log(`   Dropdown depth: ${dropdownResult.depth}`);
+        log(`   Match score: ${dropdownResult.exactnessScore || 'N/A'}`);
         log(`   Position: (${dropdownResult.position?.x}, ${dropdownResult.position?.y})`);
         debugLog(`✅ Element clicked`);
         await state.page?.waitForTimeout(1000);
@@ -7432,7 +7469,7 @@ async function executeStep(stepData) {
         const storedTitle = windowInfo?.title || (await state.page.title().catch(() => 'Unknown'));
         const windowLabel = isMainWindow ? `🏠 MAIN WINDOW` : `📍 SUBWINDOW (L${windowLevel}) "${storedTitle}"`;
         // Log step with bold formatting
-        logStep(stepId, action, target, windowLabel);
+        logStep(stepId, action, target, data, windowLabel);
         // Log environment summary
         await logWindowSummary();
         // Log frame structure if multiple frames exist
