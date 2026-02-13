@@ -28,7 +28,17 @@ if (fs.existsSync(debugLogPath)) {
 const RESULTS_DIR = 'RESULTS';
 const SCREENSHOTS_DIR = path.join(RESULTS_DIR, 'screenshots');
 const SOURCES_DIR = path.join(RESULTS_DIR, 'page_sources');
+const VIDEOS_DIR = path.join(RESULTS_DIR, 'videos');
 const RESULTS_EXCEL_FILENAME = 'Test_Results.xlsx';
+
+interface NestedTabInfo {
+    tabName: string;
+    tabSelector: string;
+    isActive: boolean;
+    parentFramePath: string;
+    level: number;
+    lastActivatedAt: number;
+}
 
 interface AutomationState {
     isPaused: boolean;
@@ -44,6 +54,7 @@ interface AutomationState {
     currentDropdownPath?: string[];  // Track nested navigation path ["Loans", "Insta Personal Loan", "Check Offer"]
     visibleDropdowns?: any[];  // Cache of visible dropdowns on page
     lastPageSnapshot?: any;  // Page state for comparison
+    activeNestedTabs?: Map<string, NestedTabInfo>;  // Track active nested tabs at each level
 }
 
 interface StepResult {
@@ -67,7 +78,8 @@ let state: AutomationState = {
     selectedExcelFile: null,
     testData: null,
     isCompleted: false,
-    shouldCloseBrowser: false
+    shouldCloseBrowser: false,
+    activeNestedTabs: new Map()
 };
 
 let logMessages: string[] = [];
@@ -75,6 +87,9 @@ let allPages: Page[] = [];  // Track all open pages/tabs
 let windowHierarchy: Map<Page, { parentPage?: Page; childPages: Page[]; level: number; openedAt: number; title?: string; url?: string }> = new Map();  // Track nested windows with timestamp, title, and URL
 let currentSearchContext: { windowPath: string; frameLevel: number; totalFrames: number } | null = null;  // Live search status
 let latestSubwindow: Page | null = null;  // Track the most recently opened subwindow
+let allDetectedNestedTabs: Map<string, NestedTabInfo[]> = new Map();  // Track all nested tabs by window path: "WINDOW_PATH" → [tabs]
+let lastDetectedFrameInfo: Map<string, any> = new Map();  // Track previously detected iframes to detect NEW ones
+let latestDetectedNewFrame: { name: string; id: string; title: string; detectedAt: number } | null = null;  // Most recently detected new iframe
 
 /* ============== UTILITY FUNCTIONS ============== */
 
@@ -95,6 +110,747 @@ function getWindowPath(page: Page, isMainPage: boolean = false): string {
     const level = windowHierarchy.get(page)?.level || 1;
     const indent = '📍 '.repeat(level);
     return `${indent}SUBWINDOW (Level ${level})`;
+}
+
+/**
+ * NESTED TAB DETECTION - Scan frame for all nested tab/tab-like elements
+ * Returns array of detected tabs with selector patterns
+ */
+async function detectNestedTabs(frame: any, windowPath: string): Promise<NestedTabInfo[]> {
+    try {
+        const tabs = await frame.evaluate(() => {
+            const detectedTabs: any[] = [];
+            
+            // Pattern 1: HTML <tab> or custom [role="tab"] elements
+            const tabElements = Array.from(document.querySelectorAll('[role="tab"], [role="tablist"] > button, [role="tablist"] > div[role="tab"], .tab, .tabs > button, [data-tab], [aria-label*="Tab"]')) as HTMLElement[];
+            
+            // Pattern 2: Tab container with nav structure
+            const navTabs = Array.from(document.querySelectorAll('nav button, nav [role="button"], ul[role="tablist"] li, .nav-tabs li')) as HTMLElement[];
+            
+            // Pattern 3: Bootstrap tabs pattern
+            const bootstrapTabs = Array.from(document.querySelectorAll('.nav-tabs a, [role="presentation"] a')) as HTMLElement[];
+            
+            // Pattern 4: Material Design tabs
+            const mdTabs = Array.from(document.querySelectorAll('[role="tab"][aria-selected], .mat-tab-label')) as HTMLElement[];
+            
+            const allTabLike = Array.from(new Set([...tabElements, ...navTabs, ...bootstrapTabs, ...mdTabs]));
+            
+            allTabLike.forEach((tab, idx) => {
+                if (!tab.textContent || tab.textContent.trim().length === 0) return; // Skip empty tabs
+                
+                const style = window.getComputedStyle(tab);
+                if (style.display === 'none' || style.visibility === 'hidden') return; // Skip hidden tabs
+                
+                const tabText = tab.textContent.trim().substring(0, 50);
+                const tabId = tab.id || `nested_tab_${idx}`;
+                
+                // Detect active tab using multiple patterns
+                const isActive = 
+                    tab.getAttribute('aria-selected') === 'true' || 
+                    tab.classList.contains('active') ||
+                    tab.classList.contains('selected') ||
+                    tab.classList.contains('current') ||
+                    tab.getAttribute('data-active') === 'true' ||
+                    tab.getAttribute('aria-current') === 'page' ||
+                    // Check if the associated panel/content is visible
+                    (tab as any).__data?.selected === true;
+                
+                detectedTabs.push({
+                    text: tabText,
+                    id: tabId,
+                    className: tab.className,
+                    ariaLabel: tab.getAttribute('aria-label') || '',
+                    isActive: isActive,
+                    selector: `[role="tab"]:has-text("${tabText}"), [data-tab*="${tabText.split(' ')[0]}"], button:has-text("${tabText}"), a:has-text("${tabText}")`
+                });
+            });
+            
+            return detectedTabs;
+        }).catch(() => []);
+
+        // Convert to NestedTabInfo format
+        const tabInfos: NestedTabInfo[] = tabs.map((tab, idx) => ({
+            tabName: tab.text,
+            tabSelector: tab.selector,
+            isActive: tab.isActive,
+            parentFramePath: windowPath,
+            level: 1,
+            lastActivatedAt: tab.isActive ? Date.now() : 0
+        }));
+
+        if (tabInfos.length > 0) {
+            log(`   🔖 [NESTED TABS] Detected ${tabInfos.length} nested tab(s):`);
+            tabInfos.forEach((tab, idx) => {
+                const activeLabel = tab.isActive ? ' ⭐ [ACTIVE]' : '';
+                log(`      [${idx + 1}] ${tab.tabName}${activeLabel}`);
+            });
+        }
+
+        return tabInfos;
+    } catch (error: any) {
+        // Silently fail if tab detection not applicable to this frame
+        return [];
+    }
+}
+
+/**
+ * ACTIVATE NESTED TAB - Click on a specific nested tab to show its content
+ */
+async function activateNestedTab(frame: any, tabName: string): Promise<boolean> {
+    try {
+        log(`   🔖 [TAB ACTIVATION] Attempting to activate tab: "${tabName}"`);
+        
+        // Try multiple selector patterns
+        const selectors = [
+            `[role="tab"]:has-text("${tabName}")`,
+            `button:has-text("${tabName}")`,
+            `a:has-text("${tabName}")`,
+            `div[role="tab"]:has-text("${tabName}")`,
+            `.nav-link:has-text("${tabName}")`,
+            `.nav-tabs a:has-text("${tabName}")`
+        ];
+
+        let clickedSuccessfully = false;
+
+        for (const selector of selectors) {
+            try {
+                const element = await frame.locator(selector).first();
+                const isVisible = await element.isVisible().catch(() => false);
+                
+                if (isVisible) {
+                    // Try Playwright click first
+                    try {
+                        await element.click({ timeout: 3000, force: true });
+                        clickedSuccessfully = true;
+                        log(`   ✅ [TAB CLICKED] Tab button "${tabName}" clicked successfully`);
+                        break;
+                    } catch (clickErr: any) {
+                        // Fallback: JavaScript click
+                        try {
+                            await element.evaluate((el: any) => {
+                                el.click();
+                            });
+                            clickedSuccessfully = true;
+                            log(`   ✅ [TAB CLICKED (JS)] Tab button "${tabName}" clicked via JavaScript`);
+                            break;
+                        } catch (jsErr: any) {
+                            log(`   ⚠️  Both Playwright and JS click failed for selector: ${selector}`);
+                            continue;
+                        }
+                    }
+                }
+            } catch (e) {
+                // Try next selector
+                continue;
+            }
+        }
+
+        if (!clickedSuccessfully) {
+            log(`   ⚠️  [TAB ACTIVATION FAILED] Could not click tab: "${tabName}"`);
+            return false;
+        }
+
+        // CRITICAL: After clicking, wait for tab animation AND DOM to update
+        log(`   ⏳ Waiting for tab animation and content to load...`);
+        await frame.waitForTimeout(800); // Wait for tab animation and DOM update
+
+        // Verify the tab actually became active by checking if content changed
+        try {
+            const verifyActive = await frame.evaluate((tabNameToCheck) => {
+                // Check if the tab or its associated content is now visible
+                const tabs = Array.from(document.querySelectorAll('[role="tab"], .nav-link, .tab-label, button[class*="tab"]')) as HTMLElement[];
+                for (const tab of tabs) {
+                    if (tab.textContent?.includes(tabNameToCheck)) {
+                        const isActive = tab.getAttribute('aria-selected') === 'true' || 
+                                        tab.classList.contains('active') ||
+                                        tab.classList.contains('selected');
+                        return isActive;
+                    }
+                }
+                return true; // Assume it worked if we can't verify
+            }, tabName);
+
+            if (verifyActive) {
+                log(`   ✅ [TAB ACTIVATED] "${tabName}" is now the active tab - content should be visible`);
+                return true;
+            } else {
+                log(`   ⚠️  [TAB VERIFY FAILED] Tab "${tabName}" may not be active after click`);
+                // Don't fail yet - content might be loading
+                return true;
+            }
+        } catch (verifyErr: any) {
+            log(`   ℹ️  Could not verify tab status: ${verifyErr.message} (continuing anyway)`);
+            return true; // Assume activation worked
+        }
+    } catch (error: any) {
+        log(`   ❌ [TAB ACTIVATION ERROR] ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * DETECT VISIBLE MODALS - Check for modal/dialog overlays that should be priority
+ */
+async function detectVisibleModals(frame: any, windowPath: string): Promise<any[]> {
+    try {
+        const modals = await frame.evaluate(() => {
+            const modalSelectors = [
+                '[role="dialog"]',
+                '[role="alertdialog"]',
+                '.modal:not([style*="display: none"])',
+                '.modal.show',
+                '.modal.fade.show',
+                '.ui-dialog:not([style*="display: none"])',
+                '[class*="dialog"][class*="open"]',
+                '[class*="dialog"]:not([style*="display: none"])',
+                '[class*="modal"][class*="open"]',
+                '[class*="popup"][class*="open"]',
+                '.overlay:not([style*="display: none"])',
+                '[class*="overlay"][class*="show"]'
+            ];
+            
+            const foundModals: any[] = [];
+            const seenElements = new Set();
+            
+            for (const selector of modalSelectors) {
+                try {
+                    const elements = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
+                    for (const el of elements) {
+                        // Skip if we've already added this element
+                        if (seenElements.has(el)) continue;
+                        
+                        const style = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        
+                        // Check if actually visible and takes up significant space
+                        if (style.display !== 'none' && style.visibility !== 'hidden' && 
+                            rect.height > 50 && rect.width > 50 &&  // Min size for modal
+                            style.opacity !== '0') {
+                            
+                            const title = el.getAttribute('aria-label') || 
+                                         el.getAttribute('title') ||
+                                         el.querySelector('[class*="title"]')?.textContent?.trim() || 
+                                         el.querySelector('h1, h2, h3, h4')?.textContent?.trim() ||
+                                         'Modal Dialog';
+                            
+                            const zIndex = parseInt(style.zIndex) || 0;
+                            const hasBackdrop = !!document.querySelector('[class*="backdrop"], [class*="overlay"]');
+                            
+                            foundModals.push({
+                                title: title.substring(0, 50),
+                                selector: selector,
+                                hasClose: !!el.querySelector('[class*="close"], [class*="dismiss"], button[aria-label*="Close"], [aria-label*="close"]'),
+                                zIndex: zIndex,
+                                backstyle: style.position,
+                                hasBackdrop: hasBackdrop,
+                                width: Math.round(rect.width),
+                                height: Math.round(rect.height)
+                            });
+                            
+                            seenElements.add(el);
+                        }
+                    }
+                } catch (selectorErr) {
+                    // Skip this selector if it's invalid
+                }
+            }
+            
+            // Sort by z-index (highest first - topmost modals)
+            // If z-index is same, sort by when they appear in DOM (later = on top)
+            return foundModals.sort((a, b) => {
+                if (a.zIndex !== b.zIndex) {
+                    return b.zIndex - a.zIndex;
+                }
+                return 0;
+            });
+        }).catch(() => []);
+        
+        if (modals.length > 0) {
+            log(`   🔲 [MODALS DETECTED] Found ${modals.length} visible modal(s)/overlay(s):`);
+            modals.forEach((modal, idx) => {
+                const sizeStr = ` (${modal.width}x${modal.height}px, z-index: ${modal.zIndex})`;
+                const nameStr = modal.title || modal.ariaLabel || modal.selector || 'Unnamed Overlay';
+                log(`      [${idx + 1}] Name: "${nameStr}"${sizeStr}`);
+            });
+        }
+        
+        return modals;
+    } catch (error: any) {
+        log(`   ℹ️  Modal detection error: ${error.message}`);
+        return [];
+    }
+}
+
+/**
+ * SEARCH WITH TAB AWARENESS - Before searching in a frame, detect and activate correct tabs
+ */
+async function searchWithTabPriority(frame: any, target: string, windowPath: string, action: 'click' | 'fill', fillValue?: string): Promise<boolean> {
+    try {
+        // PRIORITY 0: Check for visible modals FIRST (they're on top)
+        const detectedModals = await detectVisibleModals(frame, windowPath);
+        if (detectedModals.length > 0) {
+            log(`\n   🎯 [PRIORITY 0] MODAL DETECTED - Searching ONLY within this modal (it's on top of all other content)`);
+            const topModal = detectedModals[0];
+            
+            // Try to search ONLY within the modal's content
+            try {
+                const modalResult = await frame.evaluate((targetStr: string, actionStr: string, fillVal: string) => {
+                    // Find all potentially modal elements and get the topmost one
+                    const selectors = [
+                        '[role="dialog"]',
+                        '[role="alertdialog"]',
+                        '.modal.show',
+                        '.modal.fade.show',
+                        '.ui-dialog',
+                        '[class*="dialog"][class*="open"]'
+                    ];
+                    let topEl: HTMLElement | null = null;
+                    let maxZ = -1;
+                    for (const sel of selectors) {
+                        try {
+                            const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
+                            for (const el of els) {
+                                const st = window.getComputedStyle(el);
+                                if (st.display !== 'none' && st.visibility !== 'hidden') {
+                                    const z = parseInt(st.zIndex) || 0;
+                                    if (z > maxZ || topEl === null) {
+                                        maxZ = z;
+                                        topEl = el;
+                                    }
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                    if (!topEl) return { found: false };
+                    // Search ONLY within this modal
+                    if (actionStr === 'click') {
+                        // Search for any visible element with exact text match
+                        const allElements = Array.from(topEl.querySelectorAll('*')) as HTMLElement[];
+                        const target_lower = targetStr.toLowerCase();
+                        const exactMatches = allElements.filter(el => {
+                            const txt = (el.innerText || '').trim().toLowerCase();
+                            const rect = el.getBoundingClientRect();
+                            return txt === target_lower && rect.width > 0 && rect.height > 0;
+                        });
+                        if (exactMatches.length > 0) {
+                            // Return bounding box info for best match
+                            const el = exactMatches[0];
+                            const rect = el.getBoundingClientRect();
+                            return { found: true, id: el.id, tagName: el.tagName, exact: true, bbox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+                        }
+                        // Fallback: substring match
+                        const partialMatches = allElements.filter(el => {
+                            const txt = (el.innerText || '').trim().toLowerCase();
+                            const rect = el.getBoundingClientRect();
+                            return txt.includes(target_lower) && rect.width > 0 && rect.height > 0;
+                        });
+                        if (partialMatches.length > 0) {
+                            const el = partialMatches[0];
+                            const rect = el.getBoundingClientRect();
+                            return { found: true, id: el.id, tagName: el.tagName, exact: false, bbox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+                        }
+                    }
+                    return { found: false };
+                }, target, action, fillValue);
+                
+                if (modalResult && modalResult.found) {
+                    log(`   ✅ [PRIORITY 0] Found target in modal: "${topModal.title}"`);
+                    // Try to click using ID if available
+                    if (modalResult.id) {
+                        try {
+                            const element = await frame.locator(`#${modalResult.id}`).first();
+                            const vis = await element.isVisible().catch(() => false);
+                            if (vis) {
+                                await element.hover({ timeout: 2000 }).catch(() => {});
+                                await element.click({ timeout: 3000, force: true });
+                                log(`   ✅ [MODAL-CLICK] Successfully clicked in modal via ID`);
+                                return true;
+                            }
+                        } catch (e: any) {
+                            log(`   ⚠️  [MODAL-CLICK] Failed to click via ID: ${e.message}`);
+                        }
+                    }
+                    // Fallback: bounding box click
+                    if (modalResult.bbox) {
+                        try {
+                            await frame.mouse.move(modalResult.bbox.x + modalResult.bbox.width / 2, modalResult.bbox.y + modalResult.bbox.height / 2);
+                            await frame.mouse.down();
+                            await frame.mouse.up();
+                            log(`   ✅ [MODAL-CLICK] Successfully clicked in modal via bounding box`);
+                            return true;
+                        } catch (e: any) {
+                            log(`   ⚠️  [MODAL-CLICK] Failed bounding box click: ${e.message}`);
+                        }
+                    }
+                }
+            } catch (modalErr: any) {
+                log(`   ⚠️  [MODAL-SEARCH] Modal search error: ${modalErr.message}`);
+            }
+            
+            log(`   ℹ️  Target not found in modal - falling back to tabs/frames`);
+        }
+        
+        // First, detect all nested tabs in this frame
+        const detectedTabs = await detectNestedTabs(frame, windowPath);
+
+        if (detectedTabs.length === 0) {
+            // No nested tabs - search normally
+            // 1. Try in main frame (with robust Ok button logic if target is 'Ok')
+            let foundMain = false;
+            if (action === 'click' && target.trim().toLowerCase() === 'ok') {
+                log(`   🔍 [OK-BUTTON-SEARCH] Looking for Ok button...`);
+                
+                // STRATEGY 1: Use JavaScript to find ALL clickable elements and locate Ok button
+                const okButtonInfo = await frame.evaluate(() => {
+                    const buttons: any[] = [];
+                    
+                    // Get all potentially clickable elements
+                    const selectors = [
+                        'button',
+                        'input[type="button"]',
+                        'input[type="submit"]',
+                        '[role="button"]',
+                        '[onclick]',
+                        'a[href]'
+                    ];
+                    
+                    const allElements = new Set<HTMLElement>();
+                    for (const sel of selectors) {
+                        try {
+                            document.querySelectorAll(sel).forEach((el: any) => allElements.add(el));
+                        } catch (e) {}
+                    }
+                    
+                    // Filter and analyze
+                    allElements.forEach((el: any) => {
+                        const style = window.getComputedStyle(el);
+                        if (style.display === 'none' || style.visibility === 'hidden' || el.offsetParent === null) {
+                            return; // Skip hidden/disabled
+                        }
+                        
+                        const text = (el.innerText || el.textContent || el.value || '').trim();
+                        const rect = el.getBoundingClientRect();
+                        
+                        buttons.push({
+                            text: text.substring(0, 50),
+                            tag: el.tagName,
+                            type: el.type || '',
+                            value: el.value || '',
+                            id: el.id || '',
+                            class: el.className || '',
+                            visible: true,
+                            width: rect.width,
+                            height: rect.height,
+                            x: Math.round(rect.x),
+                            y: Math.round(rect.y),
+                            isOk: text.toLowerCase() === 'ok' || text.toLowerCase() === 'ok ' || text === 'Ok',
+                            hasOkText: text.toLowerCase().includes('ok')
+                        });
+                    });
+                    
+                    return buttons;
+                });
+                
+                log(`   📊 [OK-BUTTON] Found ${okButtonInfo.length} clickable element(s):`);
+                okButtonInfo.forEach((btn, idx) => {
+                    log(`      [${idx + 1}] ${btn.tag} | Text: "${btn.text}" | ID: "${btn.id}" | Class: "${btn.class}"`);
+                });
+                
+                // PRIORITY: Exact match first
+                let targetButton = okButtonInfo.find((btn: any) => btn.isOk);
+                
+                if (!targetButton) {
+                    // FALLBACK: Contains "ok"
+                    targetButton = okButtonInfo.find((btn: any) => btn.hasOkText);
+                }
+                
+                if (targetButton) {
+                    log(`   ✅ [OK-BUTTON] Found target button: "${targetButton.text}"`);
+                    
+                    // Try multiple click strategies
+                    let clicked = false;
+                    
+                    // STRATEGY 1: Click via locator with text filter
+                    if (!clicked && (targetButton.tag === 'BUTTON' || targetButton.tag === 'INPUT')) {
+                        try {
+                            const selector = targetButton.tag === 'BUTTON' ? 'button' : `input[type="${targetButton.type}"]`;
+                            const locator = frame.locator(selector);
+                            const count = await locator.count();
+                            
+                            for (let i = 0; i < count; i++) {
+                                const loc = locator.nth(i);
+                                const text = await loc.textContent().catch(() => '');
+                                if (text.toLowerCase().includes('ok')) {
+                                    await loc.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                                    await loc.click({ timeout: 3000, force: true });
+                                    log(`   ✅ [OK-CLICK-STRATEGY-1] Clicked via locator selector`);
+                                    clicked = true;
+                                    break;
+                                }
+                            }
+                        } catch (e: any) {
+                            log(`      ⚠️  Strategy 1 failed: ${e.message}`);
+                        }
+                    }
+                    
+                    // STRATEGY 2: Click by ID if available
+                    if (!clicked && targetButton.id) {
+                        try {
+                            const locator = frame.locator(`#${targetButton.id}`);
+                            const isVisible = await locator.isVisible().catch(() => false);
+                            if (isVisible) {
+                                await locator.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                                await locator.click({ timeout: 3000, force: true });
+                                log(`   ✅ [OK-CLICK-STRATEGY-2] Clicked via ID selector`);
+                                clicked = true;
+                            }
+                        } catch (e: any) {
+                            log(`      ⚠️  Strategy 2 failed: ${e.message}`);
+                        }
+                    }
+                    
+                    // STRATEGY 3: Click by bounding box (coordinate-based)
+                    if (!clicked && targetButton.width > 0 && targetButton.height > 0) {
+                        try {
+                            const clickX = targetButton.x + targetButton.width / 2;
+                            const clickY = targetButton.y + targetButton.height / 2;
+                            log(`   📍 [OK-CLICK-STRATEGY-3] Clicking at coordinates (${Math.round(clickX)}, ${Math.round(clickY)})`);
+                            
+                            await frame.mouse.move(clickX, clickY);
+                            await frame.mouse.down();
+                            await frame.mouse.up();
+                            
+                            log(`   ✅ [OK-CLICK-STRATEGY-3] Clicked via bounding box`);
+                            clicked = true;
+                        } catch (e: any) {
+                            log(`      ⚠️  Strategy 3 failed: ${e.message}`);
+                        }
+                    }
+                    
+                    // STRATEGY 4: Focus and press Enter
+                    if (!clicked) {
+                        try {
+                            log(`   💡 [OK-CLICK-STRATEGY-4] Attempting focus + Enter key`);
+                            
+                            await frame.evaluate((id: string, cls: string) => {
+                                let el: any = null;
+                                if (id) {
+                                    el = document.getElementById(id);
+                                }
+                                if (!el && cls) {
+                                    // Try to find by class
+                                    const elements = Array.from(document.querySelectorAll(`[class*="${cls}"]`));
+                                    for (let e of elements) {
+                                        const text = (e.textContent || '').toLowerCase();
+                                        if (text.includes('ok')) {
+                                            el = e;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (el) {
+                                    (el as any).focus();
+                                    (el as any).click();
+                                }
+                            }, targetButton.id, targetButton.class);
+                            
+                            log(`   ✅ [OK-CLICK-STRATEGY-4] Executed via focus + click`);
+                            clicked = true;
+                        } catch (e: any) {
+                            log(`      ⚠️  Strategy 4 failed: ${e.message}`);
+                        }
+                    }
+                    
+                    if (clicked) {
+                        foundMain = true;
+                    }
+                } else {
+                    log(`   ❌ [OK-BUTTON] No Ok button found among ${okButtonInfo.length} elements`);
+                }
+                
+                if (!foundMain) {
+                    log(`   ℹ️  All Ok button click strategies exhausted`);
+                }
+            } else {
+                foundMain = action === 'click'
+                    ? await executeClickInFrame(frame, target, windowPath)
+                    : await executeFillInFrame(frame, target, fillValue || '', windowPath);
+            }
+            if (foundMain) return true;
+            
+            // 1b. SPECIAL HANDLING FOR OK BUTTON: Check nested iframes immediately
+            if (action === 'click' && target.trim().toLowerCase() === 'ok') {
+                log(`   🎯 [OK-BUTTON-NESTED-IFRAME-CHECK] Searching for Ok button in nested iframes...`);
+                
+                // Get child frames and search for Ok in each
+                const childFrames = frame.childFrames ? frame.childFrames() : (frame.frames ? frame.frames() : []);
+                if (childFrames && childFrames.length > 0) {
+                    log(`   📍 Found ${childFrames.length} nested iframe(s) - searching for Ok button in each`);
+                    
+                    for (let fIdx = 0; fIdx < childFrames.length; fIdx++) {
+                        const subFrame = childFrames[fIdx];
+                        try {
+                            await subFrame.waitForLoadState('domcontentloaded').catch(() => {});
+                            await subFrame.waitForTimeout(100);
+                            
+                            // Look for Ok button in this nested iframe
+                            const okInNested = await subFrame.evaluate(() => {
+                                const candidates: any[] = [];
+                                const sels = ['button', 'input[type="button"]', 'input[type="submit"]', '[role="button"]', '[onclick]'];
+                                
+                                for (const sel of sels) {
+                                    try {
+                                        document.querySelectorAll(sel).forEach((el: any) => {
+                                            const style = window.getComputedStyle(el);
+                                            if (style.display === 'none' || style.visibility === 'hidden' || el.offsetParent === null) return;
+                                            
+                                            const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+                                            if (text === 'ok') {
+                                                const rect = el.getBoundingClientRect();
+                                                candidates.push({
+                                                    text: text,
+                                                    id: el.id || '',
+                                                    class: el.className || '',
+                                                    tag: el.tagName,
+                                                    x: Math.round(rect.x),
+                                                    y: Math.round(rect.y),
+                                                    w: Math.round(rect.width),
+                                                    h: Math.round(rect.height)
+                                                });
+                                            }
+                                        });
+                                    } catch (e) {}
+                                }
+                                
+                                return candidates.length > 0 ? candidates[0] : null;
+                            }).catch(() => null);
+                            
+                            if (okInNested) {
+                                log(`   ✅ [OK-BUTTON-NESTED] Found Ok button in nested iframe ${fIdx + 1}!`);
+                                
+                                // Try clicking by ID first
+                                if (okInNested.id) {
+                                    try {
+                                        const locator = subFrame.locator(`#${okInNested.id}`);
+                                        const isVis = await locator.isVisible().catch(() => false);
+                                        if (isVis) {
+                                            await locator.click({ timeout: 3000, force: true });
+                                            log(`   ✅ [OK-CLICK-NESTED-ID] Successfully clicked via ID`);
+                                            return true;
+                                        }
+                                    } catch (e: any) {
+                                        log(`      ⚠️  ID click failed: ${e.message}`);
+                                    }
+                                }
+                                
+                                // Try coordinate-based click
+                                if (okInNested.x !== undefined && okInNested.y !== undefined) {
+                                    try {
+                                        const x = okInNested.x + okInNested.w / 2;
+                                        const y = okInNested.y + okInNested.h / 2;
+                                        log(`   📍 [OK-CLICK-NESTED-COORD] Clicking at (${Math.round(x)}, ${Math.round(y)})`);
+                                        
+                                        await subFrame.mouse.move(x, y);
+                                        await subFrame.mouse.down();
+                                        await subFrame.mouse.up();
+                                        
+                                        log(`   ✅ [OK-CLICK-NESTED-COORD] Successfully clicked`);
+                                        return true;
+                                    } catch (e: any) {
+                                        log(`      ⚠️  Coordinate click failed: ${e.message}`);
+                                    }
+                                }
+                            }
+                        } catch (nestedError: any) {
+                            log(`      ⚠️  Error searching nested iframe ${fIdx}: ${nestedError.message}`);
+                        }
+                    }
+                    
+                    log(`   ℹ️  Ok button not found in nested iframes, falling back to main frame search`);
+                }
+            }
+            
+            // 2. Enumerate all visible iframes and log their info
+            const iframeElements = await frame.evaluate(() => {
+                return Array.from(document.querySelectorAll('iframe')).map((el: any) => ({
+                    id: el.id || '',
+                    name: el.name || '',
+                    title: el.title || '',
+                    src: el.src || '',
+                    visible: el.offsetParent !== null && window.getComputedStyle(el).display !== 'none',
+                }));
+            });
+            if (iframeElements && iframeElements.length > 0) {
+                log(`   🖼️ [IFRAME DETECTED] Found ${iframeElements.length} iframe(s):`);
+                iframeElements.forEach((iframe, idx) => {
+                    log(`      [${idx + 1}] id: "${iframe.id}", name: "${iframe.name}", title: "${iframe.title}", src: "${iframe.src}", visible: ${iframe.visible}`);
+                });
+            }
+            // 3. Try in all visible iframes
+            const childFrames = frame.childFrames ? frame.childFrames() : (frame.frames ? frame.frames() : []);
+            if (childFrames && childFrames.length > 0) {
+                for (const subFrame of childFrames) {
+                    log(`   🔄 [IFRAME SEARCH] Searching in iframe...`);
+                    const foundInFrame = await searchWithTabPriority(subFrame, target, windowPath + ' > [iframe]', action, fillValue);
+                    if (foundInFrame) return true;
+                }
+            }
+            return false;
+        }
+
+        log(`\n   🔍 [NESTED TAB SEARCH] Found ${detectedTabs.length} nested tab(s) - searching all of them recursively...`);
+
+        // Helper: Recursively search inside each tab after activation
+        const recursiveTabSearch = async (tabInfo: NestedTabInfo, isActive: boolean): Promise<boolean> => {
+            // Activate tab if not already active
+            if (!isActive) {
+                const activated = await activateNestedTab(frame, tabInfo.tabName);
+                if (!activated) {
+                    log(`      ℹ️  Could not activate tab "${tabInfo.tabName}" - skipping`);
+                    return false;
+                }
+                await frame.waitForTimeout(800);
+            }
+            // Try to find and interact with element in the tab
+            const found = action === 'click'
+                ? await executeClickInFrame(frame, target, `${windowPath} > [Tab: ${tabInfo.tabName}]`)
+                : await executeFillInFrame(frame, target, fillValue || '', `${windowPath} > [Tab: ${tabInfo.tabName}]`);
+            if (found) {
+                log(`   ✅ [RECURSIVE TAB] Found in tab: "${tabInfo.tabName}"`);
+                return true;
+            }
+            // Recursively check for further nested tabs inside this tab
+            const nestedTabs = await detectNestedTabs(frame, `${windowPath} > [Tab: ${tabInfo.tabName}]`);
+            if (nestedTabs.length > 0) {
+                log(`      🔄 [RECURSIVE] Found ${nestedTabs.length} deeper nested tab(s) inside "${tabInfo.tabName}"`);
+                for (const deeperTab of nestedTabs) {
+                    const foundDeep = await recursiveTabSearch(deeperTab, deeperTab.isActive);
+                    if (foundDeep) return true;
+                }
+            }
+            return false;
+        };
+
+        // PRIORITY: Search all tabs recursively, active first
+        const activeTabs = detectedTabs.filter(t => t.isActive);
+        const inactiveTabs = detectedTabs.filter(t => !t.isActive);
+        // Search active tabs recursively
+        for (const activeTab of activeTabs) {
+            const found = await recursiveTabSearch(activeTab, true);
+            if (found) return true;
+        }
+        // Then search inactive tabs recursively
+        for (const inactiveTab of inactiveTabs) {
+            const found = await recursiveTabSearch(inactiveTab, false);
+            if (found) return true;
+        }
+
+        log(`   ⚠️  Target not found in ANY nested tab (including all levels)`);
+        return false;
+    } catch (error: any) {
+        log(`   ❌ [TAB SEARCH ERROR] ${error.message}`);
+        return false;
+    }
 }
 
 function ensureDir(dirPath: string) {
@@ -459,6 +1215,125 @@ async function logWindowAndFrameInfo(): Promise<void> {
 }
 
 /**
+ * CRITICAL: Detect and log ALL iframes on the current page (including NESTED iframes)
+ * Identifies NEW iframes that were not present before
+ * Logs detailed information for user visibility
+ * IMPORTANT: Also searches for iframes within iframes using Playwright frames
+ */
+async function detectAndLogAllIframes(): Promise<void> {
+    if (!state.page || state.page.isClosed()) return;
+    
+    try {
+        // Get all frames using Playwright's API (includes nested frames)
+        const allFrames = state.page.frames();
+        log(`\n🔍 [FRAME DETECTION] Total frames via Playwright: ${allFrames.length}`);
+        
+        // Collect iframes from main page
+        const iframesInfo = await state.page.evaluate(() => {
+            return Array.from(document.querySelectorAll('iframe')).map((iframe: any, idx: number) => ({
+                index: idx,
+                name: iframe.name || '',
+                id: iframe.id || '',
+                title: iframe.title || '',
+                src: iframe.src || '',
+                className: iframe.className || '',
+                visible: iframe.offsetParent !== null && window.getComputedStyle(iframe).display !== 'none',
+                width: iframe.offsetWidth,
+                height: iframe.offsetHeight,
+                frameKey: `${iframe.name || iframe.id || 'unnamed'}_${idx}` // Unique key for tracking
+            }));
+        });
+
+        // Also look for nested iframes within accessible frames
+        const allNestedIframes: any[] = [];
+        
+        for (const frame of allFrames) {
+            if (frame === state.page.mainFrame()) continue; // Skip main frame
+            
+            try {
+                const nestedIframes = await frame.evaluate(() => {
+                    return Array.from(document.querySelectorAll('iframe')).map((iframe: any, idx: number) => ({
+                        name: iframe.name || '',
+                        id: iframe.id || '',
+                        title: iframe.title || '',
+                        src: iframe.src || '',
+                        parentFrameName: window.name || 'main',
+                        visible: iframe.offsetParent !== null && window.getComputedStyle(iframe).display !== 'none',
+                        width: iframe.offsetWidth,
+                        height: iframe.offsetHeight
+                    }));
+                }).catch(() => []);
+                
+                allNestedIframes.push(...nestedIframes);
+            } catch (e) {
+                // Can't access this frame, continue
+            }
+        }
+
+        // Combine top-level and nested iframes
+        const totalIframes = [...iframesInfo, ...allNestedIframes];
+        
+        if (totalIframes.length === 0) {
+            lastDetectedFrameInfo.clear();
+            return;
+        }
+
+        // Log iframe header
+        log(`\n🖼️ ╔════════════════════════════════════════════════════╗`);
+        log(`🖼️ ║ 📦 IFRAME DETECTION REPORT ║`);
+        log(`🖼️ ║ Total iframes: ${totalIframes.length} (top-level + nested) ║`);
+        log(`🖼️ ╚════════════════════════════════════════════════════╝`);
+
+        // Detect NEW iframes
+        const newFrames: typeof totalIframes = [];
+        const existingFrames: typeof totalIframes = [];
+
+        for (const frameInfo of totalIframes) {
+            const frameKey = `${frameInfo.name || frameInfo.id || 'unnamed'}`;
+            if (!lastDetectedFrameInfo.has(frameKey)) {
+                // NEW iframe detected!
+                newFrames.push(frameInfo);
+                lastDetectedFrameInfo.set(frameKey, frameInfo);
+                latestDetectedNewFrame = {
+                    name: frameInfo.name,
+                    id: frameInfo.id,
+                    title: frameInfo.title,
+                    detectedAt: Date.now()
+                };
+                log(`🎯 [NEW IFRAME] Name: "${frameInfo.name}", ID: "${frameInfo.id}", Title: "${frameInfo.title}"`);
+            } else {
+                existingFrames.push(frameInfo);
+            }
+        }
+
+        // Log all iframes with status
+        log(`\n📋 ALL IFRAMES ON PAGE (including nested):`);
+        totalIframes.forEach((frameInfo, idx) => {
+            const isNew = newFrames.some(f => (f.name || f.id) === (frameInfo.name || frameInfo.id));
+            const status = isNew ? ' 🆕 [NEW]' : '';
+            let displayName = frameInfo.name || frameInfo.id || `iframe_${frameInfo.index || idx}`;
+            
+            log(`   [${idx + 1}] Name: "${displayName}"${status}`);
+            log(`       ├─ ID: "${frameInfo.id}"`);
+            log(`       ├─ Title: "${frameInfo.title}"`);
+            if (frameInfo.src) log(`       ├─ Src: "${frameInfo.src}"`);
+            log(`       ├─ Visible: ${frameInfo.visible ? '✅ YES' : '❌ NO'}`);
+            log(`       └─ Size: ${frameInfo.width}x${frameInfo.height}px`);
+        });
+
+        if (newFrames.length > 0) {
+            log(`\n⭐ ATTENTION: ${newFrames.length} NEW iframe(s) detected!`);
+            log(`🎯 [SEARCH PRIORITY] Will search NEW iframes FIRST in next action`);
+            log(`🎯 [TARGET IFRAME] Latest new frame: "${latestDetectedNewFrame?.name || latestDetectedNewFrame?.id}"`);
+        }
+
+        log('');
+    } catch (e: any) {
+        log(`⚠️  iframe detection error: ${e.message}`);
+    }
+}
+
+/**
  * Build a visual string representation of window hierarchy
  */
 function buildHierarchyString(): string {
@@ -573,6 +1448,95 @@ async function takeStepScreenshot(stepId: string): Promise<string> {
     }
 }
 
+/**
+ * Save video recording from a page
+ */
+async function savePageVideo(page: Page, videoName: string): Promise<string> {
+    if (page.isClosed()) {
+        return '';
+    }
+    try {
+        const videoPath = await page.video()?.path();
+        if (videoPath) {
+            log(`✅ Video saved: ${videoPath}`);
+            return path.relative(RESULTS_DIR, videoPath).replace(/\\/g, '/');
+        }
+    } catch (e) {
+        log(`Note: Video may still be processing or unavailable`);
+    }
+    return '';
+}
+
+/**
+ * Format the results Excel worksheet with proper alignment, borders, and column widths
+ */
+function formatResultsWorksheet(ws: XLSX.WorkSheet, rows: any[]) {
+    if (!ws['!cols']) ws['!cols'] = [];
+    if (!ws['!ref']) return;
+
+    // Get columns from first row
+    const firstRow = rows[0];
+    if (!firstRow) return;
+
+    const columns = Object.keys(firstRow);
+    const colWidths: { [key: string]: number } = {
+        'TO BE EXECUTED': 12,
+        'STEP': 12,
+        'STEP ID': 14,
+        'Test Case Name': 20,
+        'ACTION': 18,
+        'TARGET': 20,
+        'DATA': 15,
+        'EXPECTED Status': 15,
+        'Status': 12,
+        'Remarks': 25,
+        'Actual Output': 25,
+        'Screenshot': 30,
+        'Page Source': 30
+    };
+
+    // Set column widths
+    columns.forEach((col, i) => {
+        const width = colWidths[col] || 18;
+        if (!ws['!cols']) ws['!cols'] = [];
+        ws['!cols']![i] = { wch: width };
+    });
+
+    // Apply formatting to all cells
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellAddress = XLSX.utils.encode_col(C) + XLSX.utils.encode_row(R);
+            const cell = ws[cellAddress];
+            
+            if (!cell) continue;
+
+            // Header row (R = 0)
+            if (R === 0) {
+                cell.s = {
+                    font: { bold: true, color: { rgb: 'FFFFFF' }, size: 12 },
+                    fill: { fgColor: { rgb: '366092' } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+                    border: { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+                };
+            } else {
+                // Data rows
+                const alignment = ['TO BE EXECUTED', 'Status'].includes(columns[C]) ? 'center' : 'left';
+                const wrapText = ['Remarks', 'Actual Output', 'Screenshot', 'Page Source', 'DATA'].includes(columns[C]);
+                
+                cell.s = {
+                    alignment: { horizontal: alignment as any, vertical: 'top', wrapText },
+                    border: { top: { style: 'thin', color: { rgb: 'D3D3D3' } }, bottom: { style: 'thin', color: { rgb: 'D3D3D3' } }, left: { style: 'thin', color: { rgb: 'D3D3D3' } }, right: { style: 'thin', color: { rgb: 'D3D3D3' } } },
+                    fill: R % 2 === 0 ? { fgColor: { rgb: 'F9F9F9' } } : { fgColor: { rgb: 'FFFFFF' } }
+                };
+            }
+        }
+    }
+
+    // Freeze header row
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+}
+
 async function savePageSource(stepId: string): Promise<string> {
     if (!state.page || state.page.isClosed()) {
         log(`Page is closed, cannot save source`);
@@ -588,6 +1552,489 @@ async function savePageSource(stepId: string): Promise<string> {
         log(`Failed to save source: ${e}`);
         return '';
     }
+}
+
+/**
+ * Generate a consolidated HTML test report for all steps
+ */
+function generateConsolidatedReport(rows: any[], excelFilePath: string): string {
+    const passedCount = rows.filter(r => r['Status'] === 'PASS').length;
+    const failedCount = rows.filter(r => r['Status'] === 'FAIL').length;
+    const skippedCount = rows.filter(r => r['Status'] === 'SKIPPED').length;
+    const totalCount = rows.length;
+    const executedCount = passedCount + failedCount;
+    const successRate = executedCount > 0 ? ((passedCount / executedCount) * 100).toFixed(1) : '0.0';
+    
+    const now = new Date();
+    const timestamp = now.toLocaleString();
+    const duration = '~' + (rows.length * 2) + 's'; // Approximate duration
+    
+    let reportHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Automation Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header-subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+            border-top: 4px solid #667eea;
+        }
+        
+        .stat-card.passed {
+            border-top-color: #4caf50;
+        }
+        
+        .stat-card.failed {
+            border-top-color: #f44336;
+        }
+        
+        .stat-card.skipped {
+            border-top-color: #ff9800;
+        }
+        
+        .stat-card.total {
+            border-top-color: #2196f3;
+        }
+        
+        .stat-number {
+            font-size: 36px;
+            font-weight: bold;
+            color: #667eea;
+            margin: 10px 0;
+        }
+        
+        .stat-card.passed .stat-number { color: #4caf50; }
+        .stat-card.failed .stat-number { color: #f44336; }
+        .stat-card.skipped .stat-number { color: #ff9800; }
+        .stat-card.total .stat-number { color: #2196f3; }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .meta-info {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            font-size: 13px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        
+        .meta-item {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #ecf0f1;
+            padding: 8px 0;
+        }
+        
+        .meta-item:last-child {
+            border-bottom: none;
+        }
+        
+        .meta-label {
+            color: #7f8c8d;
+            font-weight: 600;
+        }
+        
+        .meta-value {
+            color: #2c3e50;
+            word-break: break-word;
+        }
+        
+        .steps-section {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .section-header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .step-item {
+            border-bottom: 1px solid #ecf0f1;
+            transition: background 0.3s;
+        }
+        
+        .step-item:last-child {
+            border-bottom: none;
+        }
+        
+        .step-header {
+            padding: 16px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #f8f9fa;
+            transition: background 0.3s;
+        }
+        
+        .step-header:hover {
+            background: #ecf0f1;
+        }
+        
+        .step-header.passed {
+            background: #f1f8f4;
+        }
+        
+        .step-header.failed {
+            background: #fdf1f0;
+        }
+        
+        .step-header.skipped {
+            background: #fef5f0;
+        }
+        
+        .step-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+        
+        .step-id {
+            font-weight: 600;
+            color: #2c3e50;
+            min-width: 100px;
+        }
+        
+        .step-action {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        
+        .status-badge.PASS {
+            background: #c8e6c9;
+            color: #1b5e20;
+        }
+        
+        .status-badge.FAIL {
+            background: #ffcdd2;
+            color: #b71c1c;
+        }
+        
+        .status-badge.SKIPPED {
+            background: #ffe0b2;
+            color: #e65100;
+        }
+        
+        .status-icon {
+            font-size: 18px;
+            margin-right: 8px;
+        }
+        
+        .step-details {
+            display: none;
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #ecf0f1;
+        }
+        
+        .step-details.active {
+            display: block;
+        }
+        
+        .detail-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 20px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        
+        .detail-label {
+            font-weight: 600;
+            color: #2c3e50;
+            white-space: nowrap;
+        }
+        
+        .detail-value {
+            color: #555;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+        
+        .link-value {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 13px;
+        }
+        
+        .link-value:hover {
+            text-decoration: underline;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: #7f8c8d;
+            font-size: 12px;
+            border-top: 1px solid #ecf0f1;
+            margin-top: 30px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50 0%, #45a049 100%);
+            transition: width 0.3s;
+        }
+        
+        .chevron {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-right: 2px solid #2c3e50;
+            border-bottom: 2px solid #2c3e50;
+            transform: rotate(-45deg);
+            transition: transform 0.3s;
+            margin-left: 8px;
+        }
+        
+        .step-item.expanded .chevron {
+            transform: rotate(45deg);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 Test Automation Report</h1>
+            <p class="header-subtitle">Comprehensive test execution summary with detailed step-by-step results</p>
+        </div>
+        
+        <div class="stats-container">
+            <div class="stat-card total">
+                <div class="stat-label">Total Steps</div>
+                <div class="stat-number">${totalCount}</div>
+            </div>
+            <div class="stat-card passed">
+                <div class="stat-label">Passed</div>
+                <div class="stat-number">${passedCount}</div>
+                <div class="progress-bar"><div class="progress-fill" style="width: ${(passedCount/totalCount)*100}%"></div></div>
+            </div>
+            <div class="stat-card failed">
+                <div class="stat-label">Failed</div>
+                <div class="stat-number">${failedCount}</div>
+                <div class="progress-bar"><div class="progress-fill" style="background: #f44336; width: ${(failedCount/totalCount)*100}%"></div></div>
+            </div>
+            <div class="stat-card skipped">
+                <div class="stat-label">Skipped</div>
+                <div class="stat-number">${skippedCount}</div>
+                <div class="progress-bar"><div class="progress-fill" style="background: #ff9800; width: ${(skippedCount/totalCount)*100}%"></div></div>
+            </div>
+        </div>
+        
+        <div class="meta-info">
+            <div class="meta-item">
+                <span class="meta-label">📊 Success Rate:</span>
+                <span class="meta-value">${successRate}%</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">⏱️ Duration:</span>
+                <span class="meta-value">${duration}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">📅 Timestamp:</span>
+                <span class="meta-value">${timestamp}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">📁 Source File:</span>
+                <span class="meta-value">${path.basename(excelFilePath)}</span>
+            </div>
+        </div>
+        
+        <div class="steps-section">
+            <div class="section-header">📋 Step-by-Step Results</div>
+    `;
+    
+    // Add step details
+    rows.forEach((row, index) => {
+        const stepId = row['STEP'] || row['STEP ID'] || `STEP_${index + 1}`;
+        const action = row['ACTION'] || 'N/A';
+        const status = row['Status'] || 'UNKNOWN';
+        const remarks = row['Remarks'] || '-';
+        const actualOutput = row['Actual Output'] || '-';
+        const screenshot = row['Screenshot'] || '';
+        const pageSource = row['Page Source'] || '';
+        const target = row['TARGET'] || row['Target'] || '-';
+        const data = row['DATA'] || '-';
+        
+        const statusIcon = status === 'PASS' ? '✅' : status === 'FAIL' ? '❌' : '⏭️';
+        const statusClass = status.toUpperCase();
+        
+        reportHtml += `
+            <div class="step-item" data-step="${stepId}">
+                <div class="step-header ${statusClass.toLowerCase()}" onclick="this.parentElement.classList.toggle('expanded'); this.nextElementSibling.classList.toggle('active')">
+                    <div class="step-title">
+                        <span class="status-icon">${statusIcon}</span>
+                        <span class="step-id">Step ${index + 1}: ${stepId}</span>
+                        <span class="step-action">${action}</span>
+                    </div>
+                    <span class="status-badge ${statusClass}">${status}</span>
+                    <span class="chevron"></span>
+                </div>
+                <div class="step-details">
+                    <div class="detail-row">
+                        <div class="detail-label">Action:</div>
+                        <div class="detail-value">${action}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Target:</div>
+                        <div class="detail-value">${target}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Data:</div>
+                        <div class="detail-value">${data}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Status:</div>
+                        <div class="detail-value"><span class="status-badge ${statusClass}">${status}</span></div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Remarks:</div>
+                        <div class="detail-value">${remarks}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Output:</div>
+                        <div class="detail-value">${actualOutput}</div>
+                    </div>
+        `;
+        
+        if (screenshot) {
+            reportHtml += `
+                    <div class="detail-row">
+                        <div class="detail-label">Screenshot:</div>
+                        <div class="detail-value"><a href="${screenshot}" target="_blank" class="link-value">📷 View Screenshot</a></div>
+                    </div>
+            `;
+        }
+        
+        if (pageSource) {
+            reportHtml += `
+                    <div class="detail-row">
+                        <div class="detail-label">Page Source:</div>
+                        <div class="detail-value"><a href="${pageSource}" target="_blank" class="link-value">📄 View HTML Source</a></div>
+                    </div>
+            `;
+        }
+        
+        reportHtml += `
+                </div>
+            </div>
+        `;
+    });
+    
+    reportHtml += `
+        </div>
+        
+        <div class="footer">
+            <p>Test Automation Report · Generated on ${timestamp}</p>
+            <p>Platform: Playwright Test Automation Assistant</p>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-expand failed steps
+        document.querySelectorAll('.step-item').forEach(item => {
+            const status = item.querySelector('.status-badge').textContent.trim();
+            if (status === 'FAIL') {
+                item.classList.add('expanded');
+                item.querySelector('.step-details').classList.add('active');
+            }
+        });
+    </script>
+</body>
+</html>
+    `;
+    
+    return reportHtml;
 }
 
 /* ============== SELF-HEALING METHODS ============== */
@@ -664,6 +2111,7 @@ async function findElementThroughShadowDOM(searchText: string): Promise<any> {
                     el.tagName === 'A' ||
                     el.getAttribute('role') === 'button' ||
                     el.onclick !== null ||
+                    (el.tagName === 'INPUT' && el.getAttribute('type') === 'button') ||
                     getComputedStyle(el).cursor === 'pointer'
                 ) {
                     return { tag: el.tagName, role: el.getAttribute('role'), found: true };
@@ -681,6 +2129,7 @@ async function findElementThroughShadowDOM(searchText: string): Promise<any> {
                     if (shadowEl.textContent?.includes(text) && (
                         shadowEl.tagName === 'BUTTON' ||
                         shadowEl.getAttribute('role') === 'button' ||
+                        (shadowEl.tagName === 'INPUT' && shadowEl.getAttribute('type') === 'button') ||
                         getComputedStyle(shadowEl).cursor === 'pointer'
                     )) {
                         return { tag: shadowEl.tagName, role: shadowEl.getAttribute('role'), isShadow: true, found: true };
@@ -1020,7 +2469,7 @@ async function verifyElementExists(selector: string, target: string, frame: any 
                 exists: true,
                 visible: style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0',
                 inViewport: rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth,
-                clickable: !!(element.tagName === 'BUTTON' || element.tagName === 'A' || element.getAttribute('role') === 'button' || element.getAttribute('onclick')),
+                clickable: !!(element.tagName === 'BUTTON' || element.tagName === 'A' || element.getAttribute('role') === 'button' || element.getAttribute('onclick') || (element.tagName === 'INPUT' && element.getAttribute('type') === 'button')),
                 rect: {width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom}
             };
         }, {sel: selector, searchText: target});
@@ -1833,15 +3282,15 @@ async function searchInAllFrames(target: string, action: 'click' | 'fill', fillV
                 
                 log(`🔍 [${framePath}] Searching for: "${target}"`);
                 
-                // Step 3c: Execute targeted search based on action type
+                // Step 3c: Execute targeted search with NESTED TAB PRIORITY
                 if (action === 'click') {
-                    // CLICK SEARCH PATTERN - Sequential strategies for maximum accuracy
-                    const clickResult = await executeClickInFrame(frame, target, framePath);
+                    // CLICK SEARCH PATTERN - Now with nested tab awareness!
+                    const clickResult = await searchWithTabPriority(frame, target, framePath, 'click');
                     if (clickResult) return true;
                     
                 } else if (action === 'fill' && fillValue) {
-                    // FILL SEARCH PATTERN - Sequential strategies for maximum accuracy
-                    const fillResult = await executeFillInFrame(frame, target, fillValue, framePath);
+                    // FILL SEARCH PATTERN - Now with nested tab awareness!
+                    const fillResult = await searchWithTabPriority(frame, target, framePath, 'fill', fillValue);
                     if (fillResult) return true;
                 }
                 
@@ -1870,6 +3319,101 @@ async function searchInAllSubwindows(target: string, action: 'click' | 'fill', f
     try {
         log(`\n🪟 ========== [SEARCH STRATEGY: PRIORITY WINDOW FIRST] ==========`);
         log(`🪟 Total windows available: ${allPages.length}`);
+        
+        // 🎯 PRIORITY 0: Check for NEWLY DETECTED IFRAMES in current page
+        if (latestDetectedNewFrame && Date.now() - latestDetectedNewFrame.detectedAt < 30000) { // Within last 30 seconds
+            log(`\n⭐ [PRIORITY 0 - NEW IFRAME] Detected new iframe: Name="${latestDetectedNewFrame.name}", ID="${latestDetectedNewFrame.id}"`);
+            log(`⭐ [PRIORITY 0] Will search in NEW iframe FIRST before other windows`);
+            
+            // Try to search in iframes of the current page, prioritizing new ones  
+            try {
+                const frames = state.page?.frames() || [];
+                log(`   🔍 Current page has ${frames.length} frame(s) available`);
+                
+                // Get frame details for matching - query main page to find the actual iframe element
+                let iframeElement: any = null;
+                try {
+                    iframeElement = await state.page.locator(`iframe[id="${latestDetectedNewFrame.id}"], iframe[name="${latestDetectedNewFrame.name}"]`).first();
+                } catch (e) {
+                    // iframe not found
+                }
+                let foundInNewFrame = false;
+                
+                if (iframeElement) {
+                    log(`   ✅ [PRIORITY 0] Located iframe in DOM: id="${latestDetectedNewFrame.id}", name="${latestDetectedNewFrame.name}"`);
+                    
+                    // Try to get the actual frame object by searching through frames
+                    for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
+                        const frame = frames[frameIdx];
+                        try {
+                            // Get the iframe element for this frame to check its ID
+                            const frameUrl = frame.url();
+                            const isMainFrame = frame === state.page.mainFrame();
+                            
+                            // Try to match by iframe content
+                            if (!isMainFrame) {
+                                await frame.waitForLoadState('domcontentloaded').catch(() => {});
+                                await frame.waitForTimeout(50);
+                                
+                                log(`      📍 Searching frame ${frameIdx}: ${isMainFrame ? 'Main' : 'Child'} | URL: ${frameUrl.substring(0, 80)}`);
+                                
+                                if (action === 'click') {
+                                    const result = await searchWithTabPriority(frame, target, `[PRIORITY-0-NEW-IFRAME]:Frame${frameIdx}`, 'click');
+                                    if (result) {
+                                        log(`   ✅ [PRIORITY 0] Found and clicked in NEW iframe!`);
+                                        foundInNewFrame = true;
+                                        break;
+                                    }
+                                } else if (action === 'fill' && fillValue) {
+                                    const result = await searchWithTabPriority(frame, target, `[PRIORITY-0-NEW-IFRAME]:Frame${frameIdx}`, 'fill', fillValue);
+                                    if (result) {
+                                        log(`   ✅ [PRIORITY 0] Field found and filled in NEW iframe!`);
+                                        foundInNewFrame = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        } catch (frameError: any) {
+                            // Continue to next frame
+                        }
+                    }
+                } else {
+                    log(`   ⚠️  [PRIORITY 0] Could not locate iframe in DOM - searching all frames...`);
+                    // Fallback: search all frames
+                    for (let frameIdx = 0; frameIdx < frames.length; frameIdx++) {
+                        const frame = frames[frameIdx];
+                        if (frame === state.page.mainFrame()) continue;
+                        
+                        try {
+                            await frame.waitForLoadState('domcontentloaded').catch(() => {});
+                            await frame.waitForTimeout(50);
+                            
+                            log(`      📍 Searching frame ${frameIdx} (fallback)`);
+                            
+                            if (action === 'click') {
+                                const result = await searchWithTabPriority(frame, target, `[PRIORITY-0-FALLBACK]:Frame${frameIdx}`, 'click');
+                                if (result) {
+                                    foundInNewFrame = true;
+                                    break;
+                                }
+                            } else if (action === 'fill' && fillValue) {
+                                const result = await searchWithTabPriority(frame, target, `[PRIORITY-0-FALLBACK]:Frame${frameIdx}`, 'fill', fillValue);
+                                if (result) {
+                                    foundInNewFrame = true;
+                                    break;
+                                }
+                            }
+                        } catch (frameError: any) {
+                            // Continue
+                        }
+                    }
+                }
+                
+                if (foundInNewFrame) return true;
+            } catch (newFrameErr: any) {
+                log(`   ⚠️  Error in PRIORITY 0 search: ${newFrameErr.message}`);
+            }
+        }
         
         // Log details of all open windows (always show, even if only 1)
         for (let wIdx = 0; wIdx < allPages.length; wIdx++) {
@@ -1978,7 +3522,7 @@ async function searchWindowsRecursively(
         // If subwindow with no frames, try direct element search
         if (depth > 0 && frames.length === 0) {
             log(`   ⚠️  [SUBWINDOW] No frames detected in subwindow - trying direct page search...`);
-            // Try searching directly on the page object
+            // Try searching directly on the page object with TAB-AWARE search
             try {
                 const frameObj = {
                     locator: (sel: string) => currentPage.locator(sel),
@@ -1986,13 +3530,13 @@ async function searchWindowsRecursively(
                 };
                 
                 if (action === 'click') {
-                    const result = await executeClickInFrame(frameObj, target, `${windowLabel}:DirectPage`);
+                    const result = await searchWithTabPriority(frameObj, target, `${windowLabel}:DirectPage`, 'click');
                     if (result) {
                         log(`   ✅ Found target in direct page search!`);
                         return true;
                     }
                 } else if (action === 'fill') {
-                    const result = await executeFillInFrame(frameObj, target, fillValue || '', `${windowLabel}:DirectPage`);
+                    const result = await searchWithTabPriority(frameObj, target, `${windowLabel}:DirectPage`, 'fill', fillValue);
                     if (result) {
                         log(`   ✅ Found field in direct page search!`);
                         return true;
@@ -2017,7 +3561,8 @@ async function searchWindowsRecursively(
                 log(`   📍 [Frame ${frameIdx + 1}/${frames.length}] ${frameLabel}`);
                 
                 if (action === 'click') {
-                    const result = await executeClickInFrame(frame, target, `${windowLabel}:${frameLabel}`);
+                    // Use TAB-AWARE search for nested tabs
+                    const result = await searchWithTabPriority(frame, target, `${windowLabel}:${frameLabel}`, 'click');
                     if (result) {
                         state.page = currentPage;
                         log(`   ✅ SUCCESS! Target "${target}" found and clicked in ${frameLabel}`);
@@ -2026,7 +3571,8 @@ async function searchWindowsRecursively(
                         log(`   ⚠️  Target not found in this frame, continuing...`);
                     }
                 } else if (action === 'fill' && fillValue) {
-                    const result = await executeFillInFrame(frame, target, fillValue, `${windowLabel}:${frameLabel}`);
+                    // Use TAB-AWARE search for nested tabs
+                    const result = await searchWithTabPriority(frame, target, `${windowLabel}:${frameLabel}`, 'fill', fillValue);
                     if (result) {
                         state.page = currentPage;
                         log(`   ✅ SUCCESS! Field "${target}" found and filled with "${fillValue}" in ${frameLabel}`);
@@ -2234,21 +3780,21 @@ async function clickDropdownTrigger(frame: any, dropdownContainer: any, level: n
                 
                 for (let i = containerIndex - 1; i >= Math.max(containerIndex - 3, 0); i--) {
                     const sibling = siblings[i] as HTMLElement;
-                    const buttons = sibling.querySelectorAll('button, [role="button"], a[href]');
+                    const buttons = sibling.querySelectorAll('button, [role="button"], a[href], input[type="button"]');
                     if (buttons.length > 0) return buttons[buttons.length - 1]; // Last button
-                    if (sibling.tagName === 'BUTTON' || sibling.getAttribute('role') === 'button') return sibling;
+                    if (sibling.tagName === 'BUTTON' || sibling.getAttribute('role') === 'button' || (sibling.tagName === 'INPUT' && sibling.getAttribute('type') === 'button')) return sibling;
                 }
             }
             
             // Try: Look for button inside dropdown (toggle button)
-            const internalButton = container.querySelector('button, [role="button"]');
+            const internalButton = container.querySelector('button, [role="button"], input[type="button"]');
             if (internalButton && internalButton.offsetParent !== null) return internalButton;
             
             // Try: Parent element that has button or is itself clickable
             let p = container.parentElement;
             while (p && p !== document.documentElement) {
-                if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button') return p;
-                const btn = p.querySelector(':scope > button, :scope > [role="button"]');
+                if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button' || (p.tagName === 'INPUT' && p.getAttribute('type') === 'button')) return p;
+                const btn = p.querySelector(':scope > button, :scope > [role="button"], :scope > input[type="button"]');
                 if (btn) return btn;
                 p = p.parentElement;
             }
@@ -2291,6 +3837,172 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
     const targetTrimmedLower = target.trim().toLowerCase();
     
     try {
+        // **SPECIAL HANDLING FOR OK BUTTON** - Check early and aggressively
+        if (targetTrimmedLower === 'ok') {
+            log(`   🎯 [OK-BUTTON-SPECIAL] Special handling for Ok button in ${framePath}`);
+            
+            const okButtonFound = await frame.evaluate(() => {
+                // Find ALL clickable elements
+                const candidates: any[] = [];
+                const sels = ['button', 'input[type="button"]', 'input[type="submit"]', '[role="button"]', '[onclick]'];
+                
+                for (const sel of sels) {
+                    try {
+                        document.querySelectorAll(sel).forEach((el: any) => {
+                            const style = window.getComputedStyle(el);
+                            if (style.display === 'none' || style.visibility === 'hidden' || el.offsetParent === null) return;
+                            
+                            const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+                            const rect = el.getBoundingClientRect();
+                            
+                            candidates.push({
+                                text: text,
+                                el: el,
+                                tag: el.tagName,
+                                id: el.id || '',
+                                class: el.className || '',
+                                isOk: text === 'ok',
+                                rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) }
+                            });
+                        });
+                    } catch (e) {}
+                }
+                
+                // Return exact match if found
+                const exactMatch = candidates.find(c => c.isOk);
+                if (exactMatch) {
+                    return { found: true, id: exactMatch.id, rect: exactMatch.rect, text: exactMatch.text };
+                }
+                
+                // Otherwise return first match with "ok" text
+                const anyMatch = candidates.find(c => c.text === 'ok' || c.text === 'ok ');
+                if (anyMatch) {
+                    return { found: true, id: anyMatch.id, rect: anyMatch.rect, text: anyMatch.text };
+                }
+                
+                // List all buttons for logging
+                return { found: false, candidates: candidates.slice(0, 10) };
+            });
+            
+            if (okButtonFound.found && okButtonFound.id) {
+                // Try clicking by ID
+                try {
+                    const locator = frame.locator(`#${okButtonFound.id}`).first();
+                    const isVis = await locator.isVisible().catch(() => false);
+                    if (isVis) {
+                        await locator.click({ timeout: 3000, force: true });
+                        log(`   ✅ [OK-BUTTON-ID-CLICK] Successfully clicked Ok button via ID: #${okButtonFound.id}`);
+                        await frame.waitForTimeout(300);
+                        return true;
+                    }
+                } catch (e: any) {
+                    log(`      ⚠️  ID click failed: ${e.message}`);
+                }
+            }
+            
+            if (okButtonFound.found && okButtonFound.rect) {
+                // Try clicking by coordinates
+                try {
+                    const x = okButtonFound.rect.x + okButtonFound.rect.w / 2;
+                    const y = okButtonFound.rect.y + okButtonFound.rect.h / 2;
+                    log(`   📍 [OK-BUTTON-COORD-CLICK] Clicking at (${Math.round(x)}, ${Math.round(y)})`);
+                    
+                    await frame.mouse.move(x, y);
+                    await frame.mouse.down();
+                    await frame.mouse.up();
+                    
+                    log(`   ✅ [OK-BUTTON-COORD-CLICK] Successfully clicked Ok button via coordinates`);
+                    await frame.waitForTimeout(300);
+                    return true;
+                } catch (e: any) {
+                    log(`      ⚠️  Coordinate click failed: ${e.message}`);
+                }
+            }
+            
+            if (okButtonFound.candidates && okButtonFound.candidates.length > 0) {
+                log(`   📊 [OK-BUTTON] Available buttons:`);
+                okButtonFound.candidates.forEach((btn: any, idx: number) => {
+                    log(`      [${idx + 1}] "${btn.text}" | ${btn.tag} | ID: ${btn.id} | Class: ${btn.class}`);
+                });
+            } else if (!okButtonFound.found) {
+                log(`   ❌ [OK-BUTTON] No Ok button found in this frame`);
+            }
+        }
+        
+        // **PRIORITY 0 - HIGHEST**: Search nested iframes FIRST if any exist in this frame
+        // This ensures dialogs/popups opened as iframes take absolute priority
+        try {
+            log(`   🔍 [NESTED-IFRAME-PRIORITY] Checking for nested iframes in ${framePath}...`);
+            const nestedIframes = await frame.locator('iframe').all().catch(() => []);
+            
+            if (nestedIframes.length > 0) {
+                log(`   🎯 [NESTED-IFRAME-PRIORITY] Found ${nestedIframes.length} nested iframe(s)! Searching with highest priority...`);
+                
+                for (let iIdx = 0; iIdx < nestedIframes.length; iIdx++) {
+                    try {
+                        const nestedIframe = nestedIframes[iIdx];
+                        const iframeId = await nestedIframe.getAttribute('id').catch(() => `iframe_${iIdx}`);
+                        const iframeName = await nestedIframe.getAttribute('name').catch(() => `unnamed_${iIdx}`);
+                        const iframeTitle = await nestedIframe.getAttribute('title').catch(() => '');
+                        
+                        log(`   📍 [NESTED-IFRAME ${iIdx + 1}/${nestedIframes.length}] ID: "${iframeId}", Name: "${iframeName}", Title: "${iframeTitle}"`);
+                        
+                        // Wait for nested iframe to be visible
+                        await nestedIframe.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+                        await frame.waitForTimeout(200);
+                        
+                        // Try using Playwright's frameLocator for more reliable access
+                        const frameLocatorSelector = `iframe[id="${iframeId}"]`;
+                        const nestedFrameLocator = frame.frameLocator(frameLocatorSelector).first();
+                        
+                        // Search for clickable elements in nested iframe
+                        const clickables = await nestedFrameLocator.locator('button, [role="button"], input[type="button"], input[type="submit"], a, [onclick]').all().catch(() => []);
+                        
+                        if (clickables.length > 0) {
+                            log(`      🔍 Found ${clickables.length} clickable elements in nested iframe`);
+                            
+                            for (const clickable of clickables) {
+                                try {
+                                    const text = await clickable.textContent().catch(() => '');
+                                    const attrValue = await clickable.getAttribute('value').catch(() => '');
+                                    const title = await clickable.getAttribute('title').catch(() => '');
+                                    const allText = `${text} ${attrValue} ${title}`.toLowerCase();
+                                    
+                                    if (allText.includes(targetLower)) {
+                                        log(`      ✅ [NESTED-IFRAME-PRIORITY] FOUND "${target}" in nested iframe! Clicking now...`);
+                                        try {
+                                            await clickable.click({ timeout: 5000, force: true }).catch(() => {});
+                                            log(`      ✅ [NESTED-IFRAME-SUCCESS] Successfully clicked "${target}" in nested iframe!`);
+                                            await frame.waitForTimeout(300);
+                                            return true;
+                                        } catch (clickErr) {
+                                            // Try JavaScript click fallback
+                                            try {
+                                                await clickable.evaluate((el: any) => el.click ? el.click() : el.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+                                                log(`      ✅ [NESTED-IFRAME-SUCCESS-JS] Successfully clicked "${target}" via JavaScript in nested iframe!`);
+                                                await frame.waitForTimeout(300);
+                                                return true;
+                                            } catch (e) {
+                                                log(`      ⚠️  Click failed in nested iframe, trying next element...`);
+                                            }
+                                        }
+                                    }
+                                } catch (elemErr) {
+                                    // Continue to next element
+                                }
+                            }
+                        }
+                    } catch (nestedErr: any) {
+                        log(`      ⚠️  Error searching nested iframe ${iIdx}: ${nestedErr.message}`);
+                    }
+                }
+                
+                log(`   ℹ️ [NESTED-IFRAME-PRIORITY] Element not found in nested iframes, falling back to frame-level search...`);
+            }
+        } catch (priorityErr: any) {
+            log(`   ℹ️ [NESTED-IFRAME-PRIORITY] Nested iframe search failed: ${priorityErr.message}`);
+        }
+        
         // **PRIORITY CHECK 1**: Try known button ID patterns first
         const knownButtonIds = {
             'start': ['startBtn', 'start_btn', 'start-btn', 'btnStart', 'startButton', 'button_start'],
@@ -2561,7 +4273,7 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
             }
 
             // **HELPER FUNCTION: Detect and get the currently visible dropdown container**
-            async function getCurrentVisibleDropdown(): Promise<any> {
+            const getCurrentVisibleDropdown = async (): Promise<any> => {
                 try {
                     const dropdownInfo = await frame.evaluate(() => {
                         // Look for DOM elements that appear to be dropdown containers
@@ -2652,7 +4364,10 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                             
                             for (const el of elements) {
                                 const text = await el.textContent().catch(() => '');
-                                if (text.toLowerCase().includes(step.toLowerCase())) {
+                                const textNorm = text.trim().toLowerCase();
+                                const stepNorm = step.trim().toLowerCase();
+                                // EXACT match only for dropdown items
+                                if (textNorm === stepNorm) {
                                     const visible = await el.isVisible().catch(() => false);
                                     if (visible) {
                                         found = el;
@@ -2700,10 +4415,11 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                         let siblingFound: any = null;
                         for (const el of allElements) {
                             const text = await el.textContent().catch(() => '');
-                            const textLower = text.toLowerCase();
-                            const buttonLower = siblingButton.toLowerCase();
+                            const textNorm = text.trim().toLowerCase();
+                            const buttonNorm = siblingButton.trim().toLowerCase();
                             
-                            if (textLower === buttonLower || (textLower.includes(buttonLower) && text.trim().length < 100)) {
+                            // EXACT match only for dropdown items
+                            if (textNorm === buttonNorm) {
                                 const visible = await el.isVisible().catch(() => false);
                                 if (visible) {
                                     siblingFound = el;
@@ -2803,11 +4519,11 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                         // Find all visible matches for this step
                         for (const el of stepElements) {
                             const text = await el.textContent().catch(() => '');
-                            const textLower = text.toLowerCase();
-                            const stepLower = currentStep.toLowerCase();
+                            const textNorm = text.trim().toLowerCase();
+                            const stepNorm = currentStep.trim().toLowerCase();
                             
-                            // Check for exact or close match
-                            if (textLower === stepLower || textLower.includes(stepLower)) {
+                            // EXACT match only for dropdown items
+                            if (textNorm === stepNorm) {
                                 const isVisible = await el.isVisible().catch(() => false);
                                 if (isVisible) {
                                     visibleMatches.push({ el, text });
@@ -2824,7 +4540,10 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                             // Try finding non-visible element to open parent
                             for (const el of stepElements) {
                                 const text = await el.textContent().catch(() => '');
-                                if (text.toLowerCase().includes(currentStep.toLowerCase())) {
+                                const textNorm = text.trim().toLowerCase();
+                                const stepNorm = currentStep.trim().toLowerCase();
+                                // EXACT match only for dropdown items
+                                if (textNorm === stepNorm) {
                                     stepElement = el;
                                     stepText = text;
                                     log(`   ⚠️  Found "${stepText.trim()}" but NOT visible - trying to open parent...`);
@@ -2920,10 +4639,13 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                 let foundText: string = '';
                 let visibleElements: any[] = [];
                 
-                // IMPORTANT: Find ALL matching elements and filter by visibility
+                // IMPORTANT: Find ALL matching elements and filter by visibility - EXACT match only
                 for (const el of allElements) {
                     const text = await el.textContent().catch(() => '');
-                    if (text.toLowerCase().includes(targetLower)) {
+                    const textNorm = text.trim().toLowerCase();
+                    const targetNorm = target.trim().toLowerCase();
+                    // EXACT match only for dropdown items
+                    if (textNorm === targetNorm) {
                         // Check if this element is actually visible on screen
                         const isVisible = await el.isVisible().catch(() => false);
                         if (isVisible) {
@@ -2938,10 +4660,13 @@ async function executeClickInFrame(frame: any, target: string, framePath: string
                     foundText = visibleElements[0].text;
                     log(`   ✓ [VISIBILITY CHECK] Found ${visibleElements.length} visible element(s) matching "${target}"`);
                 } else {
-                    // Fallback: try to find first match regardless of visibility (for later opening)
+                    // Fallback: try to find first match regardless of visibility (for later opening) - EXACT match only
                     for (const el of allElements) {
                         const text = await el.textContent().catch(() => '');
-                        if (text.toLowerCase().includes(targetLower)) {
+                        const textNorm = text.trim().toLowerCase();
+                        const targetNorm = target.trim().toLowerCase();
+                        // EXACT match only for dropdown items
+                        if (textNorm === targetNorm) {
                             foundElement = el;
                             foundText = text;
                             break;
@@ -4499,7 +6224,8 @@ async function searchInPageOverlays(target: string, action: 'click' | 'fill', fi
                                         el.onclick !== null ||
                                         onclick !== '' ||
                                         className.includes('btn') ||
-                                        className.includes('button')
+                                        className.includes('button') ||
+                                        (el.tagName === 'INPUT' && el.getAttribute('type') === 'button')
                                     );
                                     
                                     if (isClickable && elVisible && inViewport) {
@@ -5313,7 +7039,10 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
         console.log(`🔍 SEARCHING FOR: "${searchTarget}"`);
         console.log(`✅ NEW HANDLER IS EXECUTING!`);
         
-        const candidates: any[] = [];
+        const exactMatches: any[] = [];
+        const phraseMatches: any[] = [];
+        const wordBoundaryMatches: any[] = [];
+        const partialMatches: any[] = [];
         
         // Search only interactive elements
         const selectors = 'button, a, [role="button"], p, span, li, div[onclick]';
@@ -5332,12 +7061,45 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
             const cleanInner = innerText.toLowerCase();
             const cleanHtml = innerHTML.toLowerCase();
             
-            // Check if ANY extraction method contains search target
-            const isMatch = cleanText.includes(searchTarget) || 
-                            cleanInner.includes(searchTarget) || 
-                            cleanHtml.includes(searchTarget);
+            // Categorize matches by precision
+            let matchType = 'none';
             
-            if (!isMatch) continue;
+            // LEVEL 1: EXACT MATCH - text is EXACTLY the search target
+            if (cleanText === searchTarget || cleanInner === searchTarget || cleanHtml === searchTarget) {
+                matchType = 'exact';
+            }
+            // LEVEL 2: PHRASE MATCH - search target appears as a continuous phrase with word boundaries
+            else if (matchType === 'none') {
+                // Create a regex that matches the search target as a continuous phrase
+                // This prevents "Personal Loan" from matching "Insta Personal Loan"
+                const phraseRegex = new RegExp('\\b' + searchTarget.replace(/\s+/g, '\\s+') + '\\b');
+                if (phraseRegex.test(cleanText) || phraseRegex.test(cleanInner) || phraseRegex.test(cleanHtml)) {
+                    matchType = 'phrase';
+                }
+            }
+            // LEVEL 3: WORD BOUNDARY MATCH - all words from search target appear as whole words (but not necessarily together)
+            else if (matchType === 'none') {
+                const words = searchTarget.split(/\s+/);
+                let allWordsMatch = true;
+                for (const word of words) {
+                    const regex = new RegExp('\\b' + word + '\\b');
+                    if (!regex.test(cleanText) && !regex.test(cleanInner) && !regex.test(cleanHtml)) {
+                        allWordsMatch = false;
+                        break;
+                    }
+                }
+                if (allWordsMatch && words.length > 0 && words[0].length > 0) {
+                    matchType = 'wordBoundary';
+                }
+            }
+            // LEVEL 4: PARTIAL/INCLUDES MATCH - search target appears as substring
+            else if (matchType === 'none') {
+                if (cleanText.includes(searchTarget) || cleanInner.includes(searchTarget) || cleanHtml.includes(searchTarget)) {
+                    matchType = 'partial';
+                }
+            }
+            
+            if (matchType === 'none') continue;
             
             const rect = (el as HTMLElement).getBoundingClientRect();
             const style = window.getComputedStyle(el as HTMLElement);
@@ -5367,78 +7129,76 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 parent = parent.parentElement;
             }
             
-            // Calculate exactness score for better matching
-            let exactnessScore = 0;
-            
-            // Exact match = 1000 points
-            if (cleanText === searchTarget || cleanInner === searchTarget) {
-                exactnessScore += 1000;
-            }
-            // Starts with search term = 500 points
-            else if (cleanText.startsWith(searchTarget) || cleanInner.startsWith(searchTarget)) {
-                exactnessScore += 500;
-            }
-            // Ends with search term = 300 points
-            else if (cleanText.endsWith(searchTarget) || cleanInner.endsWith(searchTarget)) {
-                exactnessScore += 300;
-            }
-            // Contains whole words (word boundary match) = 200 points
-            else {
-                const words = searchTarget.split(/\s+/);
-                let wordMatches = 0;
-                for (const word of words) {
-                    const regex = new RegExp('\\b' + word + '\\b');
-                    if (regex.test(cleanText) || regex.test(cleanInner)) {
-                        wordMatches++;
-                    }
-                }
-                exactnessScore += wordMatches * 100;
-            }
-            
-            // Prefer shorter text length (closer to actual search term length)
-            const textLength = cleanText.length;
-            const lengthPenalty = Math.abs(textLength - searchTarget.length) * 2;
-            exactnessScore -= lengthPenalty;
-            
-            debugCount++;
-            if (debugCount <= 15) {
-                console.log(`   Match #${debugCount}: <${(el as HTMLElement).tagName}> viewport=${isInViewport} depth=${dropdownDepth} score=${exactnessScore} text="${fullText.substring(0, 40)}"`);
-            }
-            
-            candidates.push({
+            const candidate = {
                 el: el,
                 tag: (el as HTMLElement).tagName,
                 text: fullText.substring(0, 100),
+                matchType: matchType,
                 dropdownDepth: dropdownDepth,
                 size: rect.width * rect.height,
                 rect: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) },
                 isInViewport: isInViewport,
-                exactnessScore: exactnessScore
-            });
+                textLength: fullText.length
+            };
+            
+            if (matchType === 'exact') {
+                exactMatches.push(candidate);
+            } else if (matchType === 'phrase') {
+                phraseMatches.push(candidate);
+            } else if (matchType === 'wordBoundary') {
+                wordBoundaryMatches.push(candidate);
+            } else {
+                partialMatches.push(candidate);
+            }
+            
+            debugCount++;
+            if (debugCount <= 15) {
+                console.log(`   Match #${debugCount}: <${(el as HTMLElement).tagName}> type=${matchType} viewport=${isInViewport} depth=${dropdownDepth} text="${fullText.substring(0, 40)}"`);
+            }
         }
         
-        console.log(`   ✅ Found ${candidates.length} candidates`);
+        console.log(`   ✅ Found exact=${exactMatches.length} phrase=${phraseMatches.length} wordBoundary=${wordBoundaryMatches.length} partial=${partialMatches.length} candidates`);
         
-        if (candidates.length === 0) {
+        // PRIORITY: Use exact matches first, then phrase, then word boundary, then partial
+        let toClick: any[] = [];
+        if (exactMatches.length > 0) {
+            console.log(`   🎯 Using EXACT matches`);
+            toClick = exactMatches;
+        } else if (phraseMatches.length > 0) {
+            console.log(`   📝 Using PHRASE matches (continuous phrase with word boundaries)`);
+            toClick = phraseMatches;
+        } else if (wordBoundaryMatches.length > 0) {
+            console.log(`   📍 Using WORD BOUNDARY matches`);
+            toClick = wordBoundaryMatches;
+        } else if (partialMatches.length > 0) {
+            console.log(`   📌 Using PARTIAL matches (fallback)`);
+            toClick = partialMatches;
+        }
+        
+        if (toClick.length === 0) {
             console.log(`   ❌ NO MATCHES FOUND`);
             return { found: false };
         }
         
-        // FIRST: Filter to only VISIBLE/IN-VIEWPORT elements
-        const visibleCandidates = candidates.filter(c => c.isInViewport);
-        console.log(`   📺 Visible in viewport: ${visibleCandidates.length}`);
+        // Among selected category, prefer visible elements
+        const visibleInCategory = toClick.filter(c => c.isInViewport);
+        if (visibleInCategory.length > 0) {
+            toClick = visibleInCategory;
+        }
         
-        let toClick = visibleCandidates.length > 0 ? visibleCandidates : candidates;
-        
-        // Sort: prefer exactness score, then deeper dropdown nesting, then by size
+        // Sort by: SHORTEST TEXT FIRST (critical for distinguishing similar matches like "Personal Loan" vs "Insta Personal Loan")
+        // Then: deeper dropdown nesting, then by size
         toClick.sort((a, b) => {
-            if (b.exactnessScore !== a.exactnessScore) return b.exactnessScore - a.exactnessScore;
+            // FIRST PRIORITY: Prefer shortest text (exact match to search term length)
+            if (a.textLength !== b.textLength) return a.textLength - b.textLength;
+            // Then prefer deeper dropdown nesting
             if (b.dropdownDepth !== a.dropdownDepth) return b.dropdownDepth - a.dropdownDepth;
+            // Then prefer by size
             return b.size - a.size;
         });
         
         const selectedElement = toClick[0];
-        console.log(`   ✅ SELECTED: <${selectedElement.tag}> inViewport=${selectedElement.isInViewport} depth=${selectedElement.dropdownDepth} score=${selectedElement.exactnessScore} text="${selectedElement.text}" pos=(${selectedElement.rect.x},${selectedElement.rect.y})`);
+        console.log(`   ✅ SELECTED: <${selectedElement.tag}> type=${selectedElement.matchType} inViewport=${selectedElement.isInViewport} depth=${selectedElement.dropdownDepth} text="${selectedElement.text}" pos=(${selectedElement.rect.x},${selectedElement.rect.y})`);
         
         (selectedElement.el as HTMLElement).click();
         
@@ -5446,10 +7206,10 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
             found: true, 
             tag: selectedElement.tag,
             text: selectedElement.text,
+            matchType: selectedElement.matchType,
             depth: selectedElement.dropdownDepth,
             inViewport: selectedElement.isInViewport,
-            position: selectedElement.rect,
-            exactnessScore: selectedElement.exactnessScore
+            position: selectedElement.rect
         };
     }, target).catch((err) => { 
         console.log(`   ❌ EVALUATE ERROR: ${err}`);
@@ -5460,9 +7220,9 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
         log(`\n✅ Successfully clicked element!`);
         log(`   Tag: <${(dropdownResult as any).tag}>`);
         log(`   Text: "${(dropdownResult as any).text}"`);
+        log(`   Match type: ${(dropdownResult as any).matchType} (EXACT/PHRASE/WORD_BOUNDARY/PARTIAL)`);
         log(`   Visible in viewport: ${(dropdownResult as any).inViewport}`);
         log(`   Dropdown depth: ${(dropdownResult as any).depth}`);
-        log(`   Match score: ${(dropdownResult as any).exactnessScore || 'N/A'}`);
         log(`   Position: (${(dropdownResult as any).position?.x}, ${(dropdownResult as any).position?.y})`);
         debugLog(`✅ Element clicked`);
         await state.page?.waitForTimeout(1000);
@@ -5485,6 +7245,44 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
             log(`      ├─ Parent Menu: "${parentMenu}"`);
             log(`      └─ Target Item: "${actualTarget}"`);
         }
+    }
+
+    // ===== SPECIAL HANDLING FOR OK BUTTON: Direct ifrSubScreen search =====
+    // The Ok button is typically in the Account Number Generation dialog (ifrSubScreen)
+    if (actualTarget.trim().toLowerCase() === 'ok') {
+        log(`   🔴 [OK-BUTTON-SPECIAL-HANDLER] Searching for Ok button with PRIORITY targeting ifrSubScreen`);
+        
+        // Try direct ifrSubScreen access first
+        try {
+            const ifrSubScreenLocator = state.page?.frameLocator('iframe[id="ifrSubScreen"]');
+            if (ifrSubScreenLocator) {
+                log(`   📍 Found ifrSubScreen iframe - searching for Ok button inside it`);
+                
+                // Look for Ok button with various selectors in ifrSubScreen
+                const okButton = ifrSubScreenLocator.locator('input[id="BTN_OK"], input[name="BTN_OK"], button[name="BTN_OK"], input[value="OK"]').first();
+                
+                const isVisible = await okButton.isVisible().catch(() => false);
+                if (isVisible) {
+                    log(`   ✅ [OK-BUTTON-DIRECT] Found Ok button in ifrSubScreen!`);
+                    await okButton.click({ timeout: 3000, force: true });
+                    log(`   ✅ [OK-BUTTON-DIRECT] Successfully clicked!`);
+                    return true;
+                } else {
+                    log(`   ⚠️  [OK-BUTTON-DIRECT] Ok button not visible in ifrSubScreen`);
+                }
+            }
+        } catch (e: any) {
+            log(`   ⚠️  [OK-BUTTON-DIRECT] Error accessing ifrSubScreen: ${e.message}`);
+        }
+        
+        // Fallback: Use PRIORITY 0 search for Ok button
+        log(`   📍 Falling back to PRIORITY 0 search for Ok button`);
+        const okFoundWithPriority = await searchInAllSubwindows(actualTarget, 'click');
+        if (okFoundWithPriority) {
+            log(`   ✅ [OK-BUTTON-PRIORITY-0] Successfully clicked Ok in prioritized iframe!`);
+            return true;
+        }
+        log(`   ⚠️  [OK-BUTTON-PRIORITY-0] Not found in prioritized search, trying general search...`);
     }
 
     // ===== SIMPLE DIRECT SEARCH: No dropdown logic, just find and click =====
@@ -5630,6 +7428,7 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                     while (sibling && !trigger && checkCount < 5) {
                         if (sibling.tagName === 'BUTTON' || 
                             sibling.getAttribute('role') === 'button' ||
+                            (sibling.tagName === 'INPUT' && sibling.getAttribute('type') === 'button') ||
                             sibling.classList.toString().includes('trigger') ||
                             sibling.classList.toString().includes('toggle') ||
                             sibling.classList.toString().includes('btn')) {
@@ -5964,7 +7763,8 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                     el.tagName === 'A' ||
                                     el.getAttribute('role') === 'button' ||
                                     el.getAttribute('role') === 'tab' ||
-                                    el.getAttribute('onclick') !== null;
+                                    el.getAttribute('onclick') !== null ||
+                                    (el.tagName === 'INPUT' && el.getAttribute('type') === 'button');
                                 
                                 const isRadioOrCheckbox = el.tagName === 'INPUT' && (el.getAttribute('type') === 'radio' || el.getAttribute('type') === 'checkbox');
                                 
@@ -6021,7 +7821,8 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                                         element.tagName === 'A' ||
                                         element.getAttribute('role') === 'button' ||
                                         element.getAttribute('onclick') !== null ||
-                                        element.getAttribute('role') === 'tab';
+                                        element.getAttribute('role') === 'tab' ||
+                                        (element.tagName === 'INPUT' && element.getAttribute('type') === 'button');
                                     
                                     const isRadioOrCheckbox = element.tagName === 'INPUT' && (element.getAttribute('type') === 'radio' || element.getAttribute('type') === 'checkbox');
                                     
@@ -8138,7 +9939,7 @@ async function executeStep(stepData: any): Promise<StepResult> {
         };
     }
 
-    const stepId = stepData['STEP'] || `STEP_${state.currentStepIndex + 1}`;
+    const stepId = stepData['STEP'] || stepData['STEP ID'] || stepData['Step ID'] || `STEP_${state.currentStepIndex + 1}`;
     const action = (stepData['ACTION'] || '').toString().trim().toUpperCase().replace(/_/g, '');
     const target = (stepData['TARGET'] || '').toString().trim();
     const data = (stepData['DATA'] || '').toString().trim();
@@ -8184,6 +9985,10 @@ async function executeStep(stepData: any): Promise<StepResult> {
         
         // Log current window and iframe info (simplified - no modal details)
         await logWindowAndFrameInfo();
+        
+        // 🎯 CRITICAL: Detect and log ALL iframes BEFORE searching for elements
+        // This shows the user which iframes exist and which are newly opened
+        await detectAndLogAllIframes();
 
         if (action === 'OPEN' || action === 'OPENURL') {
             for (let i = 1; i <= 3; i++) {
@@ -8403,10 +10208,16 @@ async function stopAutomation() {
     log('STOPPED by user');
     if (state.browser) {
         try {
+            log('⏹️ Finalizing video recordings...');
+            // Close context to finalize videos
+            if (state.context) {
+                await state.context.close();
+                state.context = null;
+            }
             await state.browser.close();
             state.browser = null;
             state.page = null;
-            log('Browser closed by STOP button');
+            log('✅ Browser closed, videos finalized');
         } catch (e) {
             log(`Error closing: ${e}`);
         }
@@ -8442,6 +10253,7 @@ async function runAutomation(excelFilePath: string) {
         }
         log(`✅ Steps to Execute: ${executionCount}`);
         log(`⏭️  Steps to Skip: ${rows.length - executionCount}`);
+        log(`🎬 Screen Recording: ENABLED (saved to RESULTS/videos/)`);
         log(`${'█'.repeat(110)}\n`);
 
         state.testData = rows;
@@ -8459,10 +10271,16 @@ async function runAutomation(excelFilePath: string) {
             ]
         });
 
+        ensureDir(VIDEOS_DIR);
+        
         state.context = await state.browser.newContext({
             viewport: null,
             ignoreHTTPSErrors: true,
-            bypassCSP: true
+            bypassCSP: true,
+            recordVideo: {
+                dir: VIDEOS_DIR,
+                size: { width: 1920, height: 1080 }
+            }
         });
 
         // 🎯 CRITICAL: Setup context-level listener IMMEDIATELY (catches window.open() calls)
@@ -8647,12 +10465,27 @@ async function runAutomation(excelFilePath: string) {
         log(`█ 🎉 AUTOMATION TEST EXECUTION COMPLETE`);
         log(`${'█'.repeat(110)}\n`);
 
-        // Save results
+        // Save results with formatting
         const resultPath = path.join(RESULTS_DIR, RESULTS_EXCEL_FILENAME);
-        workbook.Sheets[sheetName] = XLSX.utils.json_to_sheet(rows);
+        const ws = XLSX.utils.json_to_sheet(rows);
+        
+        // Format the worksheet
+        formatResultsWorksheet(ws, rows);
+        
+        workbook.Sheets[sheetName] = ws;
         XLSX.writeFile(workbook, resultPath);
 
         log(`Results: ${resultPath}`);
+        
+        // Generate consolidated HTML report
+        try {
+            const reportHtml = generateConsolidatedReport(rows, excelFilePath);
+            const reportPath = path.join(RESULTS_DIR, 'Test_Report.html');
+            fs.writeFileSync(reportPath, reportHtml, 'utf-8');
+            log(`📊 HTML Report: ${reportPath}`);
+        } catch (e) {
+            log(`Failed to generate HTML report: ${e}`);
+        }
         
         // Mark automation as completed
         state.isCompleted = true;
@@ -8661,6 +10494,7 @@ async function runAutomation(excelFilePath: string) {
         log(`📢 The browser will stay open. You can:`);
         log(`   1. Use the UI to close the browser when ready`);
         log(`   2. Inspect the browser to verify results`);
+        log(`   3. Open RESULTS/Test_Report.html to view the consolidated test report`);
 
     } catch (error: any) {
         log(`Error: ${error.message}`);
@@ -9277,12 +11111,19 @@ const server = http.createServer(async (req, res) => {
         else if (pathname === '/close-browser' && req.method === 'POST') {
             if (state.browser) {
                 try {
+                    log('⏹️ Finalizing video recordings...');
+                    // Close context to finalize videos
+                    if (state.context) {
+                        await state.context.close();
+                        state.context = null;
+                    }
                     await state.browser.close();
                     state.browser = null;
                     state.page = null;
                     state.isCompleted = false;
+                    log('✅ Browser closed, videos finalized');
                     res.writeHead(200);
-                    res.end(JSON.stringify({ success: true, message: 'Browser closed' }));
+                    res.end(JSON.stringify({ success: true, message: 'Browser closed and videos saved' }));
                 } catch (e: any) {
                     res.writeHead(200);
                     res.end(JSON.stringify({ success: false, error: e.message }));
