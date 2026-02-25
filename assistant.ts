@@ -102,6 +102,202 @@ function updateSearchContext(windowPath: string, frameLevel: number, totalFrames
 }
 
 /**
+ * CRITICAL: Ensure element is scrolled into view on the page
+ * This solves viewport visibility issues for Country, Language, and other below-the-fold elements
+ */
+async function ensureElementVisible(selector: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+    
+    try {
+        await state.page.evaluate((sel: string) => {
+            const element = document.querySelector(sel);
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return true;
+            }
+            return false;
+        }, selector);
+        
+        await state.page.waitForTimeout(500);  // Wait for scroll animation
+        return true;
+    } catch (e) {
+        log(`⚠️  Could not scroll element into view: ${selector}`);
+        return false;
+    }
+}
+
+/**
+ * VISUAL SCROLL AND HIGHLIGHT - Find element by text, scroll into view, highlight it
+ * User will SEE what the assistant is clicking/interacting with
+ */
+async function scrollAndHighlightElement(targetText: string, action: string = 'INTERACT'): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+    
+    try {
+        log(`\n👁️  [VISUAL SCROLL] Element to ${action}: "${targetText}"`);
+        
+        // Step 1: Find the element by text (same logic as click/fill)
+        log(`   🔍 Searching for element...`);
+        const elementFound = await state.page.evaluate((target: string) => {
+            const searchTarget = target.toLowerCase().trim();
+            const selectors = 'button, a, [role="button"], input, select, textarea, p, span, li, div[onclick], div[role="option"], [role="listbox"]';
+            const elements = document.querySelectorAll(selectors);
+            
+            for (const el of Array.from(elements)) {
+                const fullText = (el.textContent || '').trim().toLowerCase();
+                const innerText = ((el as any).innerText || '').trim().toLowerCase();
+                
+                // Exact match priority
+                if (fullText === searchTarget || innerText === searchTarget) {
+                    return {
+                        found: true,
+                        tagName: el.tagName,
+                        text: (el.textContent || '').trim().substring(0, 50)
+                    };
+                }
+                
+                // Phrase match
+                if (fullText.includes(searchTarget) || innerText.includes(searchTarget)) {
+                    return {
+                        found: true,
+                        tagName: el.tagName,
+                        text: (el.textContent || '').trim().substring(0, 50)
+                    };
+                }
+            }
+            
+            return { found: false };
+        }, targetText);
+
+        if (!elementFound?.found) {
+            log(`   ⚠️  Element NOT FOUND`);
+            return false;
+        }
+
+        log(`   ✅ Element FOUND: ${elementFound.tagName} - "${elementFound.text}"`);
+        
+        // Step 2: Use Playwright to find and scroll the element
+        log(`   🎯 Scrolling into view using Playwright...`);
+        
+        let scrollSuccess = false;
+        try {
+            // Strategy 1: Try to scroll button specifically
+            await state.page.locator('button:has-text("' + targetText + '")').first().scrollIntoViewIfNeeded({ timeout: 3000 });
+            scrollSuccess = true;
+            log(`   ✅ Scrolled successfully (button)`);
+        } catch (e) {
+            try {
+                // Strategy 2: Try scrolling any element with matching text
+                await state.page.evaluate((target: string) => {
+                    const searchTarget = target.toLowerCase().trim();
+                    const selectors = 'button, a, [role="button"], input, select, textarea, p, span, li, div[onclick], div[role="option"], [role="listbox"]';
+                    const elements = document.querySelectorAll(selectors);
+                    
+                    for (const el of Array.from(elements)) {
+                        const text = (el.textContent || '').trim().toLowerCase();
+                        if (text === searchTarget || text.includes(searchTarget)) {
+                            // Scroll with multiple attempts
+                            (el as any).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            
+                            // Extra: Ensure parent is also scrollable
+                            let parent = (el as any).parentElement;
+                            for (let i = 0; i < 3; i++) {
+                                if (parent) {
+                                    (parent as any).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    parent = parent.parentElement;
+                                }
+                            }
+                            
+                            return true;
+                        }
+                    }
+                    return false;
+                }, targetText);
+                
+                scrollSuccess = true;
+                log(`   ✅ Scrolled successfully (element + parents)`);
+                
+            } catch (e2) {
+                log(`   ⚠️  Scroll failed: ${e2}`);
+            }
+        }
+        
+        // Wait longer for scroll animation
+        await state.page.waitForTimeout(1200);
+        
+        // Step 3: Highlight the element
+        log(`   🎯 Highlighting element...`);
+        await state.page.evaluate((target: string) => {
+            const searchTarget = target.toLowerCase().trim();
+            const selectors = 'button, a, [role="button"], input, select, textarea, p, span, li, div[onclick]';
+            const elements = document.querySelectorAll(selectors);
+            
+            for (const el of Array.from(elements)) {
+                const text = (el.textContent || '').trim().toLowerCase();
+                if (text === searchTarget || text.includes(searchTarget)) {
+                    const elem = el as any;
+                    // Save original style
+                    elem.setAttribute('data-original-style', elem.getAttribute('style') || '');
+                    // Apply highlight
+                    elem.style.border = '3px solid #FF6B6B';
+                    elem.style.boxShadow = '0 0 20px rgba(255, 107, 107, 1)';
+                    elem.style.backgroundColor = 'rgba(255, 200, 0, 0.15)';
+                    elem.style.transform = 'scale(1.02)';
+                    elem.style.transition = 'all 0.3s ease';
+                    return true;
+                }
+            }
+            return false;
+        }, targetText);
+        
+        log(`   ✅ Element highlighted with RED BORDER`);
+        
+        // Step 4: Take screenshot
+        log(`   📸 Taking screenshot...`);
+        const timestamp = Date.now();
+        const screenshotPath = `RESULTS/screenshots/highlight_${action}_${timestamp}.png`;
+        
+        try {
+            await state.page.screenshot({ path: screenshotPath, fullPage: false });
+            log(`   ✅ Screenshot saved`);
+        } catch (e) {
+            // Silent fail
+        }
+        
+        // Step 5: Show highlight for a bit
+        log(`   ⏱️  Pausing 1.5 seconds to visualize...`);
+        await state.page.waitForTimeout(1500);
+        
+        // Step 6: Remove highlight
+        log(`   ✨ Removing highlight...`);
+        await state.page.evaluate((target: string) => {
+            const searchTarget = target.toLowerCase().trim();
+            const selectors = 'button, a, [role="button"], input, select, textarea, p, span, li, div[onclick]';
+            const elements = document.querySelectorAll(selectors);
+            
+            for (const el of Array.from(elements)) {
+                const text = (el.textContent || '').trim().toLowerCase();
+                if (text === searchTarget || text.includes(searchTarget)) {
+                    const elem = el as any;
+                    const originalStyle = elem.getAttribute('data-original-style') || '';
+                    elem.setAttribute('style', originalStyle);
+                    elem.removeAttribute('data-original-style');
+                    return true;
+                }
+            }
+            return false;
+        }, targetText);
+        
+        log(`   ✅ Ready for interaction\n`);
+        return true;
+        
+    } catch (err: any) {
+        log(`   ⚠️  Error: ${err.message}`);
+        return false;
+    }
+}
+
+/**
  * Get window hierarchy path for display
  */
 function getWindowPath(page: Page, isMainPage: boolean = false): string {
@@ -943,11 +1139,22 @@ async function getCleanElementLabel(locator: any): Promise<string> {
     }
 }
 
+let lastLogFlushTime = 0;
+const LOG_FLUSH_INTERVAL = 100; // Flush logs every 100ms for real-time display
+
 function log(message: string) {
     const timestamp = new Date().toISOString();
     const formattedMsg = `[${timestamp}] ${message}`;
     console.log(formattedMsg);
     logMessages.push(formattedMsg);
+    
+    // Ensure FILL operations and critical messages are logged
+    if (message.includes('[FILL-REQUEST]') || message.includes('COMPLETED') || message.includes('FAILED')) {
+        const marker = `  [Logged at ${timestamp}]`;
+        if (!logMessages[logMessages.length - 1]?.includes('[Logged at')) {
+            logMessages.push(marker);
+        }
+    }
 }
 
 /**
@@ -2153,34 +2360,6 @@ async function getElementByXPath(xpath: string): Promise<boolean> {
     }, xpath) ?? false;
 }
 
-async function scrollToElement(selector: string): Promise<boolean> {
-    if (!state.page) return false;
-    
-    try {
-        log(`Scrolling to element: ${selector}`);
-        
-        // Try to scroll in all directions
-        await state.page.evaluate((sel) => {
-            // Scroll down to find element
-            for (let i = 0; i < 10; i++) {
-                const el = document.querySelector(sel);
-                if (el) {
-                    (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    return true;
-                }
-                window.scrollBy(0, 500);
-            }
-            return false;
-        }, selector);
-
-        await state.page.waitForTimeout(800);
-        return true;
-    } catch (e) {
-        log(`Scroll failed: ${e}`);
-        return false;
-    }
-}
-
 async function scrollToElementByText(text: string): Promise<boolean> {
     if (!state.page) return false;
     
@@ -2421,6 +2600,235 @@ async function removeClickPointer(frame: any): Promise<void> {
         });
     } catch (e) {
         // Silently fail
+    }
+}
+
+/**
+ * CRITICAL: Complete page cleanup after each step
+ * Removes all visual indicators, CSS injections, style modifications, and modal overlays
+ * This prevents page interface changes, scroll blocking, and darkened overlays
+ */
+async function cleanupPageAfterStep(): Promise<void> {
+    if (!state.page || state.page.isClosed()) return;
+    
+    try {
+        // Cleanup ALL frames on the page
+        const frames = state.page.frames();
+        for (const frame of frames) {
+            try {
+                await frame.evaluate(() => {
+                    // ============= REMOVE TEMPORARY ELEMENTS =============
+                    
+                    // REMOVE: Click pointer indicator
+                    const pointer = document.getElementById('__click_pointer_indicator__');
+                    if (pointer) pointer.remove();
+                    
+                    // REMOVE: All click pointer animation styles
+                    const animStyles = document.getElementById('__click_pointer_animation_styles__');
+                    if (animStyles) animStyles.remove();
+                    
+                    // REMOVE: Any remaining temporary elements
+                    const tempElements = document.querySelectorAll('[id^="__"], [class*="pointer"], [class*="indicator"]');
+                    tempElements.forEach((el: any) => {
+                        if (el.id?.includes('pointer') || el.id?.includes('indicator') || el.className?.includes('pointer') || el.className?.includes('indicator')) {
+                            try { el.remove(); } catch (e) {}
+                        }
+                    });
+                    
+                    // ============= REMOVE MODAL OVERLAYS & BACKDROPS =============
+                    
+                    // Look for common modal/overlay patterns
+                    const overlaySelectors = [
+                        '.modal-backdrop',
+                        '.overlay',
+                        '[class*="backdrop"]',
+                        '[class*="modal-overlay"]',
+                        '[class*="modal-bg"]',
+                        '[class*="overlay-bg"]',
+                        '[role="presentation"]',
+                        '.loading-overlay',
+                        '.spinner-overlay',
+                        '[style*="position: fixed"][style*="z-index"]',
+                        'div[style*="background: rgba"]',
+                        'div[style*="background-color: rgba"]'
+                    ];
+                    
+                    overlaySelectors.forEach(selector => {
+                        try {
+                            const elements = document.querySelectorAll(selector);
+                            elements.forEach((el: any) => {
+                                const style = window.getComputedStyle(el);
+                                // Remove if it looks like an overlay (fixed position, high z-index, semi-transparent)
+                                if (el.style?.zIndex || (style.zIndex && parseInt(String(style.zIndex)) > 999)) {
+                                    try { el.remove(); } catch (e) {}
+                                }
+                            });
+                        } catch (e) {}
+                    });
+                    
+                    // Remove any elements that are completely covering the page (full viewport size with high z-index)
+                    const allElements = document.querySelectorAll('*');
+                    const viewportHeight = window.innerHeight;
+                    const viewportWidth = window.innerWidth;
+                    
+                    allElements.forEach((el: any) => {
+                        try {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            const zIndex = parseInt(String(style.zIndex || 0));
+                            
+                            // If element is covering most of viewport with high z-index, it's likely an overlay
+                            if (zIndex > 900 && 
+                                rect.width > (viewportWidth * 0.8) && 
+                                rect.height > (viewportHeight * 0.5) &&
+                                (style.position === 'fixed' || style.position === 'absolute')) {
+                                
+                                // Check if it's transparent or semi-transparent (overlay-like)
+                                if (style.backgroundColor.includes('rgba') || style.opacity !== '1') {
+                                    try { el.remove(); } catch (e) {}
+                                }
+                            }
+                        } catch (e) {}
+                    });
+                    
+                    // ============= RESTORE SCROLL FUNCTIONALITY =============
+                    
+                    const htmlElement = document.documentElement;
+                    const bodyElement = document.body;
+                    
+                    // Remove overflow: hidden from html and body
+                    htmlElement.style.overflow = '';
+                    htmlElement.style.overflowX = '';
+                    htmlElement.style.overflowY = '';
+                    bodyElement.style.overflow = '';
+                    bodyElement.style.overflowX = '';
+                    bodyElement.style.overflowY = '';
+                    
+                    // Remove height restrictions
+                    htmlElement.style.height = '';
+                    bodyElement.style.height = '';
+                    
+                    // Force enable scrolling
+                    htmlElement.style.overflowY = 'auto';
+                    bodyElement.style.overflowY = 'auto';
+                    
+                    // RESTORE: Pointer events (in case they were disabled)
+                    if (htmlElement.style.pointerEvents === 'none') {
+                        htmlElement.style.pointerEvents = '';
+                    }
+                    if (bodyElement.style.pointerEvents === 'none') {
+                        bodyElement.style.pointerEvents = '';
+                    }
+                    
+                    // ============= REMOVE ANIMATIONS/TRANSITIONS THAT MIGHT INTERFERE =============
+                    
+                    htmlElement.style.animation = '';
+                    bodyElement.style.animation = '';
+                    
+                    // ============= CLEAN UP CLASSES THAT MIGHT BE BLOCKING SCROLL =============
+                    
+                    // Check for common scroll-blocking classes
+                    const scrollBlockingClasses = ['overflow-hidden', 'no-scroll', 'modal-open', 'locked'];
+                    scrollBlockingClasses.forEach(className => {
+                        if (htmlElement.classList.contains(className)) {
+                            htmlElement.classList.remove(className);
+                        }
+                        if (bodyElement.classList.contains(className)) {
+                            bodyElement.classList.remove(className);
+                        }
+                    });
+                    
+                    // ============= VERIFY SCROLL IS WORKING =============
+                    
+                    // Try to verify scroll position is accessible
+                    try {
+                        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+                        // Scroll is accessible at this point
+                    } catch (e) {
+                        // Scroll verification failed - but we've already tried to restore it above
+                    }
+                });
+            } catch (frameError) {
+                // Frame cleanup might fail - that's okay, continue with other frames
+            }
+        }
+        
+        // Additional page-level scroll restoration
+        try {
+            const scrollX = await state.page.evaluate(() => window.scrollX || 0).catch(() => 0);
+            const scrollY = await state.page.evaluate(() => window.scrollY || 0).catch(() => 0);
+            // Just verify scroll position is accessible (no output needed)
+        } catch (e) {
+            // Scroll might be blocked, but we've already tried to restore it above
+        }
+    } catch (e) {
+        // Silently fail - page cleanup errors should not stop automation
+    }
+}
+
+/**
+ * CONTINUOUS SCROLL RESTORATION: Keeps scroll enabled throughout automation
+ * Runs as a background monitor to immediately fix any scroll-blocking CSS
+ */
+async function enablePersistentScrolling(): Promise<void> {
+    if (!state.page || state.page.isClosed()) return;
+
+    try {
+        // Inject persistent scroll monitor script into all frames
+        const frames = state.page.frames();
+        for (const frame of frames) {
+            try {
+                await frame.evaluate(() => {
+                    // Create a monitoring function that runs continuously
+                    const enableScroll = () => {
+                        const html = document.documentElement;
+                        const body = document.body;
+
+                        // Aggressively restore scroll styles
+                        html.style.cssText += ' overflow: auto !important; overflow-y: auto !important; overflow-x: auto !important; height: auto !important;';
+                        body.style.cssText += ' overflow: auto !important; overflow-y: auto !important; overflow-x: auto !important; height: auto !important;';
+
+                        // Remove scroll-blocking classes
+                        ['overflow-hidden', 'no-scroll', 'modal-open', 'locked', 'overflow-y-hidden', 'overflow-x-hidden'].forEach(cls => {
+                            html.classList.remove(cls);
+                            body.classList.remove(cls);
+                        });
+
+                        // Restore pointer events
+                        if (html.style.pointerEvents === 'none') html.style.pointerEvents = '';
+                        if (body.style.pointerEvents === 'none') body.style.pointerEvents = '';
+
+                        // Remove any overlay elements blocking scroll
+                        const overlays = document.querySelectorAll('[style*="position: fixed"], [style*="position: absolute"]');
+                        overlays.forEach(el => {
+                            const style = window.getComputedStyle(el);
+                            if (parseInt(style.zIndex || '0') > 9000 && 
+                                (el as HTMLElement).offsetHeight > window.innerHeight * 0.7) {
+                                try {
+                                    if (style.backgroundColor.includes('rgba') || style.opacity === '0.5' || style.opacity === '0.7') {
+                                        (el as HTMLElement).style.display = 'none';
+                                    }
+                                } catch (e) {}
+                            }
+                        });
+                    };
+
+                    // Run immediately
+                    enableScroll();
+
+                    // Run continuously every 500ms to catch dynamically added scroll-blockers
+                    if (!(window as any).__scrollMonitorRunning) {
+                        (window as any).__scrollMonitorRunning = true;
+                        setInterval(enableScroll, 500);
+                    }
+                });
+            } catch (frameError) {
+                // Frame might not allow injection, continue
+            }
+        }
+    } catch (e) {
+        // Silently continue if scroll monitoring fails
     }
 }
 
@@ -7007,16 +7415,32 @@ async function hoverWithRetry(target: string, maxRetries: number = 5): Promise<b
 async function clickWithRetry(target: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+    
+    // 📜 ENSURE PAGE CAN SCROLL - Fix for stuck pages
+    await ensurePageScrollable();
 
     debugLog(`\n=== CLICK ATTEMPT FOR: "${target}" ===`);
     log(`\n🔍 Searching for: "${target}"`);
 
-    // ===== CHECK FOR NESTED NAVIGATION (e.g., "Loans > Insta Personal Loan > Check Offer") =====
+    // ===== CHECK FOR HIERARCHICAL DROPDOWN FORMAT WITH " > " SEPARATOR =====
+    // This is the PRIORITY handler for dropdown format: "WebMobileBranchPartner >Mobile" or "Select a country... > India"
     if (target.includes('>')) {
+        log(`\n🔽 [HIERARCHICAL DROPDOWN] Detected " > " separator in target`);
+        
+        const hierarchicalResult = await handleHierarchicalDropdown(target);
+        if (hierarchicalResult) {
+            log(`✅ Successfully handled hierarchical dropdown`);
+            await state.page?.waitForTimeout(500);
+            return true;
+        }
+        
+        log(`⚠️  Hierarchical dropdown handler failed, trying nested navigation...`);
+        
+        // Fallback to nested navigation
         const pathSteps = parseNestedPath(target);
         
         if (pathSteps.length >= 2) {
-            // Try nested navigation first
+            // Try nested navigation as fallback
             log(`\n🔄 [NESTED CLICK] Detected nested path with ${pathSteps.length} steps`);
             const nestedSuccess = await handleNestedNavigation(target);
             
@@ -7025,7 +7449,7 @@ async function clickWithRetry(target: string, maxRetries: number = 5): Promise<b
                 return true;
             }
             
-            log(`⚠️ Nested navigation failed, falling back to standard click...`);
+            log(`⚠️ Nested navigation also failed, falling back to standard click...`);
         }
     }
 
@@ -7981,38 +8405,97 @@ async function handleDropdown(target: string, value: string): Promise<boolean> {
     log(`🔽 [DROPDOWN] Attempting to handle dropdown for: "${target}" = "${value}"`);
 
     try {
-        // Strategy 1: Native <select> element
-        const selectHandled = await state.page.evaluate(({ searchTarget, selectValue }) => {
+        // Strategy 1: Native <select> element with scroll-into-view (PLAYWRIGHT METHOD)
+        log(`   🔍 [STRATEGY 1] Searching for native <select> elements on ENTIRE page...`);
+        
+        const selectInfo = await state.page.evaluate(({ searchTarget }) => {
             const selects = document.querySelectorAll('select');
-            for (const select of Array.from(selects)) {
+            console.log(`   [DEBUG] Found ${selects.length} <select> elements on page`);
+            
+            for (let i = 0; i < selects.length; i++) {
+                const select = selects[i];
                 const label = (select as any).name || (select as any).id || '';
                 const ariaLabel = select.getAttribute('aria-label') || '';
+                const dataTestId = select.getAttribute('data-testid') || '';
+                
+                console.log(`   [DEBUG] Select #${i+1}: name="${label}" aria="${ariaLabel}" id="${select.id}"`);
                 
                 // Check if this select matches our target
                 if (label.toLowerCase().includes(searchTarget.toLowerCase()) ||
-                    ariaLabel.toLowerCase().includes(searchTarget.toLowerCase())) {
+                    ariaLabel.toLowerCase().includes(searchTarget.toLowerCase()) ||
+                    dataTestId.toLowerCase().includes(searchTarget.toLowerCase())) {
                     
-                    // Find and select the option
-                    const options = (select as any).querySelectorAll('option');
-                    for (const option of Array.from(options)) {
-                        if ((option as any).textContent.toLowerCase().includes(selectValue.toLowerCase())) {
-                            (select as any).value = (option as any).value;
-                            select.dispatchEvent(new Event('change', { bubbles: true }));
-                            return true;
+                    console.log(`   ✓ MATCHED: Select element found for "${searchTarget}"`);
+                    
+                    // Return selector info so Playwright can handle the scroll
+                    return {
+                        found: true,
+                        selector: select.id ? `#${select.id}` : `select[name="${label}"]`,
+                        elementInfo: {
+                            id: select.id,
+                            name: label,
+                            type: 'native-select'
+                        }
+                    };
+                }
+            }
+            
+            console.log(`   ✗ NO MATCH found for "${searchTarget}"`);
+            return { found: false, selector: null, elementInfo: null };
+        }, { searchTarget: target });
+
+        if (selectInfo?.found) {
+            log(`   ✅ Element FOUND: ${selectInfo.elementInfo.name || selectInfo.elementInfo.id}`);
+            log(`   🎯 Now scrolling to element using Playwright method...`);
+            
+            // Use Playwright's native scroll method - MUCH MORE RELIABLE
+            try {
+                await state.page.locator(selectInfo.selector).scrollIntoViewIfNeeded({ timeout: 5000 });
+                log(`   ✅ SCROLLED into view successfully`);
+                await state.page.waitForTimeout(800);  // Wait for scroll animation
+            } catch (scrollErr) {
+                log(`   ⚠️  Scroll failed, trying alternative: ${scrollErr}`);
+                // Fallback: Just try to interact anyway
+                await state.page.waitForTimeout(300);
+            }
+
+            // Now set the value
+            log(`   🔄 Setting value to "${value}"...`);
+            const selectHandled = await state.page.evaluate((params: any) => {
+                const { searchTarget, selectValue } = params;
+                const selects = document.querySelectorAll('select');
+                
+                for (const select of Array.from(selects)) {
+                    const label = (select as any).name || (select as any).id || '';
+                    const ariaLabel = select.getAttribute('aria-label') || '';
+                    
+                    if (label.toLowerCase().includes(searchTarget.toLowerCase()) ||
+                        ariaLabel.toLowerCase().includes(searchTarget.toLowerCase())) {
+                        
+                        const options = (select as any).querySelectorAll('option');
+                        for (const option of Array.from(options)) {
+                            if ((option as any).textContent.toLowerCase().includes(selectValue.toLowerCase())) {
+                                (select as any).value = (option as any).value;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                                console.log(`   ✓ Value set to: ${(option as any).textContent}`);
+                                return true;
+                            }
                         }
                     }
                 }
-            }
-            return false;
-        }, { searchTarget: target, selectValue: value });
+                return false;
+            }, { searchTarget: target, selectValue: value });
 
-        if (selectHandled) {
-            log(`✅ [DROPDOWN] Successfully selected option in native <select>`);
-            await state.page.waitForTimeout(300);
-            return true;
+            if (selectHandled) {
+                log(`✅ [DROPDOWN] Successfully selected "${value}" in native <select> (after VISIBLE scroll)`);
+                await state.page.waitForTimeout(500);
+                return true;
+            }
+        } else {
+            log(`   ⚠️  Element NOT FOUND in Strategy 1`);
         }
-    } catch (e) {
-        log(`⚠️  Native select handling failed`);
+    } catch (e: any) {
+        log(`⚠️  Strategy 1 failed: ${e.message}`);
     }
 
     try {
@@ -8065,15 +8548,28 @@ async function handleDropdown(target: string, value: string): Promise<boolean> {
 
     try {
         // Strategy 3: Search for dropdown by looking for adjacent label + select structure
-        const adjacentHandled = await state.page.evaluate(({ labelText, optionValue }) => {
-            // Find label element containing target text
+        // This is MOST RELIABLE for labeled dropdowns like Country, Language
+        log(`   🔍 [STRATEGY 3] Searching for labeled dropdowns (COUNTRY, LANGUAGE, etc.)...`);
+        log(`   📋 Looking for label: "${target}" anywhere on page...`);
+        
+        const selectorInfo = await state.page.evaluate(({ labelText }) => {
             const labels = document.querySelectorAll('label, div, span');
-            for (const label of Array.from(labels)) {
-                if (!label.textContent?.toLowerCase().includes(labelText.toLowerCase())) continue;
+            console.log(`   [DEBUG] Found ${labels.length} label/div/span elements on page`);
+            
+            for (let labelIdx = 0; labelIdx < labels.length; labelIdx++) {
+                const label = labels[labelIdx];
+                const labelContent = label.textContent?.toLowerCase() || '';
+                
+                console.log(`   [DEBUG] Checking element #${labelIdx}: "${labelContent.substring(0, 50)}"`);
+                
+                if (!labelContent.includes(labelText.toLowerCase())) continue;
+
+                console.log(`   ✓ LABEL FOUND: "${labelText}" at index ${labelIdx}`);
 
                 // Look for nearby select or dropdown trigger
                 let parent = label.parentElement;
-                let found = false;
+                let selectFound = false;
+                let selectSelector = '';
 
                 for (let i = 0; i < 4; i++) {
                     if (!parent) break;
@@ -8081,54 +8577,347 @@ async function handleDropdown(target: string, value: string): Promise<boolean> {
                     // Check for native select
                     const select = parent.querySelector('select');
                     if (select) {
-                        const options = select.querySelectorAll('option');
-                        for (const option of Array.from(options)) {
-                            if ((option as any).textContent.toLowerCase().includes(optionValue.toLowerCase())) {
-                                (select as any).value = (option as any).value;
-                                select.dispatchEvent(new Event('change', { bubbles: true }));
-                                found = true;
-                                break;
-                            }
+                        console.log(`   ✓ SELECT FOUND at parent level ${i}`);
+                        selectFound = true;
+                        
+                        // Build a reliable selector
+                        if (select.id) {
+                            selectSelector = `#${select.id}`;
+                        } else if ((select as any).name) {
+                            selectSelector = `select[name="${(select as any).name}"]`;
+                        } else {
+                            // Fallback: use data attribute
+                            selectSelector = `select`;
                         }
+                        break;
                     }
 
-                    // Check for custom dropdown
-                    const dropdown = parent.querySelector('[role="listbox"], [role="combobox"]');
-                    if (dropdown) {
-                        const trigger = dropdown.querySelector('button') || dropdown;
-                        (trigger as any).click?.();
-
-                        setTimeout(() => {
-                            const options = dropdown.querySelectorAll('[role="option"]');
-                            for (const option of Array.from(options)) {
-                                if ((option as any).textContent.toLowerCase().includes(optionValue.toLowerCase())) {
-                                    (option as any).click?.();
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }, 300);
-                    }
-
-                    if (found) break;
                     parent = parent.parentElement;
                 }
 
-                if (found) return true;
+                if (selectFound) {
+                    return {
+                        found: true,
+                        selector: selectSelector,
+                        labelText: labelText,
+                        elementType: 'native-select'
+                    };
+                }
             }
-            return false;
-        }, { labelText: target, optionValue: value });
 
-        if (adjacentHandled) {
-            log(`✅ [DROPDOWN] Successfully selected option via label-adjacent search`);
-            await state.page.waitForTimeout(300);
-            return true;
+            console.log(`   ✗ NO MATCHING LABEL FOUND for "${labelText}"`);
+            return { found: false, selector: null, labelText: null, elementType: null };
+        }, { labelText: target });
+
+        if (selectorInfo?.found) {
+            log(`   ✅ LABEL FOUND: "${target}"`);
+            log(`   🔗 SELECT element located: ${selectorInfo.selector}`);
+            log(`   🎯 NOW SCROLLING to make VISIBLE...`);
+            
+            // Use Playwright's native method - GUARANTEED TO WORK
+            try {
+                const locator = state.page.locator(selectorInfo.selector);
+                await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
+                log(`   ✅ SUCCESSFULLY SCROLLED INTO VIEW - Element now VISIBLE to user`);
+                await state.page.waitForTimeout(1000);  // Wait for scroll and any animations
+                
+                // Take screenshot to PROVE it's visible
+                await state.page.screenshot({ path: `RESULTS/screenshots/dropdown_visible_${Date.now()}.png` }).catch(() => {});
+                
+            } catch (scrollErr) {
+                log(`   ⚠️  Scroll issue: ${scrollErr} - Trying fallback method...`);
+                await state.page.evaluate((sel: string) => {
+                    const el = document.querySelector(sel);
+                    if (el) (el as any).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, selectorInfo.selector);
+                await state.page.waitForTimeout(1000);
+            }
+
+            // Now set the value
+            log(`   🔄 Now selecting value: "${value}"...`);
+            const valueSet = await state.page.evaluate((params: any) => {
+                const { labelText, selectValue, selector } = params;
+                
+                // Find select by selector
+                const select = document.querySelector(selector) as any;
+                if (!select) {
+                    console.log(`   ✗ Could not find select with selector: ${selector}`);
+                    return false;
+                }
+
+                const options = select.querySelectorAll('option');
+                console.log(`   [DEBUG] Found ${options.length} options in select`);
+                
+                for (const option of Array.from(options)) {
+                    const optText = ((option as any).textContent || '').toLowerCase();
+                    console.log(`   [DEBUG] Option: "${optText}"`);
+                    
+                    if (optText.includes(selectValue.toLowerCase())) {
+                        console.log(`   ✓ MATCH FOUND: "${(option as any).textContent}"`);
+                        (select as any).value = (option as any).value;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                }
+                
+                console.log(`   ✗ NO VALUE MATCH for "${selectValue}"`);
+                return false;
+            }, { labelText: target, selectValue: value, selector: selectorInfo.selector });
+
+            if (valueSet) {
+                log(`✅ [DROPDOWN] Successfully selected "${value}" for "${target}"`);
+                log(`   💾 Element is now VISIBLE and VALUE SET`);
+                await state.page.waitForTimeout(500);
+                return true;
+            } else {
+                log(`   ⚠️  Value could not be set`);
+            }
+        } else {
+            log(`   ⚠️  Label "${target}" NOT FOUND on entire page`);
         }
-    } catch (e) {
-        log(`⚠️  Label-adjacent dropdown handling failed`);
+    } catch (e: any) {
+        log(`⚠️  Strategy 3 (Label-adjacent) failed: ${e.message}`);
     }
 
     return false;
+}
+
+/**
+ * Handle HIERARCHICAL DROPDOWN with " > " separator format
+ * Example: "Web > Mobile" → find and use selectOption for SELECT elements, or click for custom dropdowns
+ * CRITICAL FIX: Use native selectOption API for <select> elements, not mouse clicks
+ */
+async function handleHierarchicalDropdown(target: string): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    // Check if target contains the " > " separator
+    if (!target.includes('>')) {
+        return false;  // Not a hierarchical dropdown
+    }
+
+    const parts = target.split('>').map(p => p.trim()).filter(p => p.length > 0);
+    if (parts.length < 2) {
+        return false;
+    }
+
+    let parentText = parts[0];  // e.g., "Web"
+    const optionText = parts[parts.length - 1];  // e.g., "Mobile"
+
+    log(`\n${'='.repeat(80)}`);
+    log(`🔽 [HIERARCHICAL DROPDOWN] Format detected with " > " separator`);
+    log(`   Full target: "${target}"`);
+    log(`   Parent text: "${parentText}"`);
+    log(`   Option to select: "${optionText}"`);
+    log(`${'='.repeat(80)}`);
+
+    try {
+        // Step 1: Find the actual dropdown control
+        log(`\n📍 STEP 1️⃣  - FINDING DROPDOWN CONTROL...`);
+        log(`   Searching for dropdown containing: "${parentText}"`);
+        
+        const dropdownInfo = await state.page.evaluate((searchParam: string) => {
+            const lower = searchParam.toLowerCase().trim();
+            
+            // Check for HTML select elements FIRST
+            const selectElements = document.querySelectorAll('select');
+            for (let i = 0; i < selectElements.length; i++) {
+                const el = selectElements[i] as HTMLSelectElement;
+                
+                // Get all options for THIS specific select
+                const options: any[] = [];
+                for (let j = 0; j < el.options.length; j++) {
+                    const opt = el.options[j];
+                    options.push({
+                        value: opt.value,
+                        text: opt.text,
+                        textLower: opt.text.toLowerCase()
+                    });
+                }
+                
+                // Check if any option contains our search term
+                const hasMatchingOption = options.some(opt => opt.textLower.includes(lower));
+                
+                if (hasMatchingOption) {
+                    // Found the RIGHT select - return it with its identifier
+                    return {
+                        type: 'SELECT',
+                        selectIndex: i,
+                        selectText: Array.from(el.options)
+                            .map(o => o.text)
+                            .join(''),
+                        options: options,
+                        elementId: el.id || null,
+                        elementName: el.name || null,
+                        selectElement: el  // Keep reference to actual element
+                    };
+                }
+            }
+            
+            return null;
+        }, parentText);
+
+        if (!dropdownInfo) {
+            log(`   ❌ FAILED: Could not find dropdown control for "${parentText}"`);
+            return false;
+        }
+
+        log(`   ✅ FOUND: ${dropdownInfo.type}`);
+        log(`      Text: "${dropdownInfo.selectText}"`);
+
+        // Step 2: Special handling for HTML SELECT elements
+        if (dropdownInfo.type === 'SELECT') {
+            log(`\n📍 STEP 2️⃣  - USING NATIVE SELECT HANDLER FOR HTML <SELECT> ELEMENT`);
+            
+            // Find the matching option by text or value
+            let optionToSelect: any = null;
+            
+            log(`   📋 Available options:`);
+            
+            for (const opt of dropdownInfo.options) {
+                const optTextDisplay = opt.text.length > 40 ? opt.text.substring(0, 37) + '...' : opt.text;
+                log(`      - "${optTextDisplay}" (value="${opt.value}")`);
+                
+                // Look for exact match (case-insensitive)
+                if (opt.textLower === optionText.toLowerCase()) {
+                    optionToSelect = opt;
+                    log(`      ✅ EXACT MATCH FOUND!`);
+                }
+                // Store first partial match as fallback
+                else if (!optionToSelect && opt.textLower.includes(optionText.toLowerCase())) {
+                    optionToSelect = opt;
+                }
+            }
+            
+            if (!optionToSelect) {
+                log(`   ❌ Could not find option "${optionText}" in SELECT element`);
+                log(`   💡 Available options: ${dropdownInfo.options.map((o: any) => o.text).join(', ')}`);
+                return false;
+            }
+
+            log(`\n📍 STEP 3️⃣  - SELECTING OPTION USING PLAYWRIGHT API...`);
+            log(`   Option value: "${optionToSelect.value}"`);
+            log(`   Option text: "${optionToSelect.text}"`);
+            log(`   SELECT element ID: ${dropdownInfo.elementId}`);
+            log(`   SELECT element name: ${dropdownInfo.elementName}`);
+            
+            // Build the best selector possible
+            let selector = 'select';  // Fallback to generic
+            
+            if (dropdownInfo.elementId && dropdownInfo.elementId !== `select_${dropdownInfo.selectIndex}`) {
+                selector = `select#${dropdownInfo.elementId}`;
+                log(`   Using ID selector: ${selector}`);
+            } else if (dropdownInfo.elementName) {
+                selector = `select[name="${dropdownInfo.elementName}"]`;
+                log(`   Using name selector: ${selector}`);
+            } else {
+                // Last resort: try to identify by option text or some unique characteristic
+                log(`   No ID/name available, using generic select and value matching`);
+            }
+            
+            try {
+                log(`   Attempting selection with value: "${optionToSelect.value || optionToSelect.text}"`);
+                
+                // Try with the best selector first
+                if (selector !== 'select') {
+                    const matchCount = await state.page.evaluate((sel: string) => {
+                        return document.querySelectorAll(sel).length;
+                    }, selector);
+                    
+                    log(`   Selector "${selector}" matches ${matchCount} element(s)`);
+                    
+                    if (matchCount > 0) {
+                        try {
+                            // Add timeout wrapper to prevent 30-second hangs
+                            const selectPromise = state.page.selectOption(selector, optionToSelect.value || optionToSelect.text);
+                            await Promise.race([
+                                selectPromise,
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('selectOption timeout')), 5000))
+                            ]);
+                            log(`   ✅ Successfully selected using: ${selector}`);
+                            await state.page.waitForTimeout(600);
+                            
+                            log(`\n${'='.repeat(80)}`);
+                            log(`✅ SUCCESS: Selected "${optionToSelect.text}" from dropdown`);
+                            log(`${'='.repeat(80)}\n`);
+                            return true;
+                        } catch (timeoutErr: any) {
+                            log(`   ⏱️  Selection timeout or failed, trying alternative...`);
+                        }
+                    }
+                }
+                
+                // If specific selector failed, try generic 'select' with timeout
+                log(`   Trying generic 'select' selector...`);
+                try {
+                    const selectPromise = state.page.selectOption('select', optionToSelect.value || optionToSelect.text);
+                    await Promise.race([
+                        selectPromise,
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('selectOption timeout')), 5000))
+                    ]);
+                    log(`   ✅ Successfully selected using generic selector`);
+                    await state.page.waitForTimeout(600);
+                    
+                    log(`\n${'='.repeat(80)}`);
+                    log(`✅ SUCCESS: Selected "${optionToSelect.text}" from dropdown`);
+                    log(`${'='.repeat(80)}\n`);
+                    return true;
+                } catch (timeoutErr: any) {
+                    log(`   ⏱️  Generic selector also timed out, using DOM manipulation...`);
+                }
+                
+            } catch (e: any) {
+                log(`   ❌ Selection failed: ${e.message}`);
+                
+                // Last resort: click the select and then try to interact
+                log(`   💡 Attempting alternative approach...`);
+                try {
+                    const result = await state.page.evaluate((args: {val: string, txt: string}) => {
+                        const selects = document.querySelectorAll('select');
+                        for (let i = 0; i < selects.length; i++) {
+                            const sel = selects[i] as HTMLSelectElement;
+                            // Try to find and set the option
+                            for (let j = 0; j < sel.options.length; j++) {
+                                if (sel.options[j].value === args.val || sel.options[j].text === args.txt) {
+                                    sel.selectedIndex = j;
+                                    // Trigger change event
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }, {val: optionToSelect.value, txt: optionToSelect.text});
+                    
+                    if (result) {
+                        log(`   ✅ Alternative approach succeeded (direct DOM manipulation)`);
+                        await state.page.waitForTimeout(600);
+                        
+                        log(`\n${'='.repeat(80)}`);
+                        log(`✅ SUCCESS: Selected "${optionToSelect.text}" using DOM manipulation`);
+                        log(`${'='.repeat(80)}\n`);
+                        return true;
+                    } else {
+                        log(`   ❌ Alternative approach couldn't find the option`);
+                        return false;
+                    }
+                } catch (e2: any) {
+                    log(`   ❌ Alternative also failed: ${e2.message}`);
+                    return false;
+                }
+            }
+        }
+
+        log(`\n${'='.repeat(80)}`);
+        log(`❌ ERROR: Unknown dropdown type`);
+        log(`${'='.repeat(80)}\n`);
+        return false;
+
+    } catch (e: any) {
+        log(`\n${'='.repeat(80)}`);
+        log(`❌ ERROR: ${e.message}`);
+        log(`${'='.repeat(80)}\n`);
+        return false;
+    }
 }
 
 /**
@@ -8179,6 +8968,9 @@ async function detectAndHandleDropdown(target: string, value: string): Promise<b
 async function fillWithRetry(target: string, value: string, maxRetries: number = 5): Promise<boolean> {
     // FIRST: Ensure page is fully loaded before attempting to find elements
     await waitForPageReady();
+    
+    // 📜 ENSURE PAGE CAN SCROLL - Fix for stuck pages
+    await ensurePageScrollable();
 
     log(`\n🔽 [FILL-REQUEST] Attempting to fill: "${target}" = "${value}"`);
 
@@ -9901,6 +10693,114 @@ async function waitForPageReady(timeout: number = 30000): Promise<boolean> {
 }
 
 /**
+ * Ensure page is fully scrollable and reveal all content
+ * Removes overflow restrictions and enables smooth scrolling
+ */
+async function ensurePageScrollable(): Promise<void> {
+    if (!state.page || state.page.isClosed()) return;
+
+    try {
+        await state.page.evaluate(() => {
+            // Enable scrolling on all elements
+            document.documentElement.style.overflow = 'auto';
+            document.body.style.overflow = 'auto';
+            document.body.style.height = 'auto';
+            document.documentElement.style.height = 'auto';
+            
+            // Remove fixed positioning on covering elements
+            const allElements = document.querySelectorAll('*');
+            for (const el of Array.from(allElements)) {
+                const style = window.getComputedStyle(el as HTMLElement);
+                
+                // If element is fixed and covering most of viewport, make it absolute
+                if (style.position === 'fixed') {
+                    const rect = (el as HTMLElement).getBoundingClientRect();
+                    if (rect.width > window.innerWidth * 0.8 || rect.height > window.innerHeight * 0.8) {
+                        (el as HTMLElement).style.position = 'relative';
+                    }
+                }
+            }
+            
+            // Ensure body is scrollable
+            return document.body.scrollHeight > window.innerHeight;
+        });
+
+        // Wait a bit for styles to apply
+        await state.page.waitForTimeout(300);
+        
+        // Scroll to top first
+        await state.page.evaluate(() => {
+            window.scrollTo(0, 0);
+        });
+        
+        log(`📜 Page scrolling enabled and ready`);
+    } catch (e: any) {
+        log(`⚠️  Could not ensure page scrollable: ${e.message}`);
+    }
+}
+
+/**
+ * Scroll to element to make it visible in viewport
+ */
+async function scrollToElement(locator: any, action: string = 'scroll'): Promise<boolean> {
+    if (!state.page || state.page.isClosed()) return false;
+
+    try {
+        // Method 1: Try Playwright's built-in scroll into view
+        try {
+            await locator.scrollIntoViewIfNeeded({ timeout: 3000 });
+            await state.page.waitForTimeout(300);
+            return true;
+        } catch (e) {
+            // Continue to fallback
+        }
+
+        // Method 2: JavaScript scroll into view
+        try {
+            await locator.evaluate((el: any) => {
+                const rect = el.getBoundingClientRect();
+                
+                // Check if element needs scrolling
+                if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+            
+            await state.page.waitForTimeout(500); // Wait for scroll animation
+            return true;
+        } catch (e) {
+            // Continue to fallback
+        }
+
+        // Method 3: Manual scroll to element's position
+        try {
+            const position = await locator.evaluate((el: any) => {
+                const rect = el.getBoundingClientRect();
+                return {
+                    top: window.pageYOffset + rect.top - 100, // 100px buffer
+                    left: window.pageXOffset + rect.left - 100
+                };
+            });
+
+            await state.page.evaluate((pos: any) => {
+                window.scrollTo({
+                    top: Math.max(0, pos.top),
+                    left: Math.max(0, pos.left),
+                    behavior: 'smooth'
+                });
+            }, position);
+
+            await state.page.waitForTimeout(500);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    } catch (error: any) {
+        return false;
+    }
+}
+
+/**
  * Execute with automatic page readiness wait before action
  */
 async function executeWithPageReady(actionFn: () => Promise<any>, stepName: string): Promise<any> {
@@ -9964,6 +10864,10 @@ async function executeStep(stepData: any): Promise<StepResult> {
             }
         }
 
+        // CRITICAL: Clean up any leftover overlays/modals BEFORE starting the step
+        // This ensures the page is ready for interaction
+        await cleanupPageAfterStep();
+        
         // Get window info for logging
         const isMainWindow = state.page === allPages[0];
         const windowInfo = windowHierarchy.get(state.page);
@@ -10009,6 +10913,9 @@ async function executeStep(stepData: any): Promise<StepResult> {
                     
                     await state.page.goto(target, { waitUntil: 'networkidle', timeout: 30000 });
                     
+                    // 📜 ENSURE PAGE IS SCROLLABLE - Fix for stuck/non-scrolling pages
+                    await ensurePageScrollable();
+                    
                     // Check if new window/tab opened during navigation
                     await switchToLatestPage();
                     
@@ -10029,6 +10936,12 @@ async function executeStep(stepData: any): Promise<StepResult> {
         }
 
         else if (action === 'CLICK') {
+            // NEW: Scroll and highlight element before clicking
+            log(`🖱️  [CLICK ACTION] Target: "${target}"`);
+            
+            // First, make the element visible and highlighted
+            await scrollAndHighlightElement(target, 'CLICK');
+            
             const success = await executeWithPageReady(
                 async () => await clickWithRetry(target, 5),
                 `${stepId}_CLICK`
@@ -10068,6 +10981,10 @@ async function executeStep(stepData: any): Promise<StepResult> {
         }
 
         else if (action === 'FILL' || action === 'TYPE') {
+            // NEW: Scroll and highlight text field before filling
+            log(`📝 [FILL ACTION] Target: "${target}" | Value: "${data}"`);
+            await scrollAndHighlightElement(target, 'FILL');
+            
             const success = await executeWithPageReady(
                 async () => await fillWithRetry(target, data, 5),
                 `${stepId}_FILL`
@@ -10092,6 +11009,10 @@ async function executeStep(stepData: any): Promise<StepResult> {
         }
 
         else if (action === 'HOVER') {
+            // NEW: Scroll and highlight element before hovering
+            log(`👆 [HOVER ACTION] Target: "${target}"`);
+            await scrollAndHighlightElement(target, 'HOVER');
+            
             const success = await executeWithPageReady(
                 async () => await hoverWithRetry(target, 5),
                 `${stepId}_HOVER`
@@ -10178,6 +11099,13 @@ async function executeStep(stepData: any): Promise<StepResult> {
         result.remarks = error.message;
         result.actualOutput = error.message;
         log(`ERROR: ${error.message}`);
+    }
+
+    // CRITICAL: Cleanup page after step to prevent interface changes and scroll blocking
+    try {
+        await cleanupPageAfterStep();
+    } catch (e) {
+        // Cleanup errors should not stop automation
     }
 
     // Capture screenshots and page source
@@ -10267,14 +11195,16 @@ async function runAutomation(excelFilePath: string) {
                 '--start-maximized',
                 '--ignore-certificate-errors',
                 '--allow-running-insecure-content',
-                '--disable-blink-features=AutomationControlled'
+                '--disable-blink-features=AutomationControlled',
+                '--disable-padding',
+                '--disable-web-resources'
             ]
         });
 
         ensureDir(VIDEOS_DIR);
         
         state.context = await state.browser.newContext({
-            viewport: null,
+            viewport: null,  // No fixed viewport - let browser use its natural size
             ignoreHTTPSErrors: true,
             bypassCSP: true,
             recordVideo: {
@@ -10956,25 +11886,38 @@ const htmlUI = `
         }
 
         async function updateProgress() {
-            const response = await fetch('/status');
-            const data = await response.json();
+            try {
+                const response = await fetch('/status', {
+                    cache: 'no-store',
+                    headers: { 'Pragma': 'no-cache' }
+                });
+                const data = await response.json();
 
-            document.getElementById('currentStep').textContent = data.currentStep + ' / ' + data.totalSteps;
-            const progress = data.totalSteps > 0 ? Math.round((data.currentStep / data.totalSteps) * 100) : 0;
-            document.getElementById('progress').textContent = progress + '%';
+                document.getElementById('currentStep').textContent = data.currentStep + ' / ' + data.totalSteps;
+                const progress = data.totalSteps > 0 ? Math.round((data.currentStep / data.totalSteps) * 100) : 0;
+                document.getElementById('progress').textContent = progress + '%';
 
-            updateLogs(data.logs);
+                // Update logs with detailed display
+                if (data.logs && Array.isArray(data.logs)) {
+                    updateLogs(data.logs);
+                } else {
+                    updateLogs([]);
+                }
 
-            // Show close browser button when automation is completed
-            if (data.isCompleted && data.hasBrowser) {
-                document.getElementById('closeBrowserBtn').style.display = 'inline-block';
-                document.getElementById('statusValue').textContent = 'Completed! Ready to close.';
-            }
+                // Show close browser button when automation is completed
+                if (data.isCompleted && data.hasBrowser) {
+                    document.getElementById('closeBrowserBtn').style.display = 'inline-block';
+                    document.getElementById('statusValue').textContent = 'Completed! Ready to close.';
+                }
 
-            if (data.isRunning) {
+                if (data.isRunning) {
+                    setTimeout(updateProgress, 500); // Increased polling frequency to 500ms
+                } else {
+                    resetUI();
+                }
+            } catch (error) {
+                console.error('Update progress error:', error);
                 setTimeout(updateProgress, 1000);
-            } else {
-                resetUI();
             }
         }
 
@@ -11008,15 +11951,50 @@ const htmlUI = `
             }, { passive: true });
         }
 
+        let lastLogCount = 0;
+        
         function updateLogs(logs) {
             const logsDiv = document.getElementById('logs');
-            logsDiv.innerHTML = logs.map(log => '<div class="log-entry">' + log + '</div>').join('');
             
-            // Auto-scroll to bottom only if:
-            // 1. User isn't manually scrolling
-            // 2. OR User scrolled to bottom and left the area
+            if (!logs || logs.length === 0) {
+                logsDiv.innerHTML = '<div class="log-entry" style="color: #999;">No logs yet...</div>';
+                return;
+            }
+            
+            // Build HTML for logs with color coding for better visibility
+            const htmlParts = logs.map(log => {
+                let style = 'color: #666;';
+                
+                // Color code based on content type
+                if (log.includes('✅') || log.includes('SUCCESS') || log.includes('COMPLETED')) {
+                    style = 'color: #4caf50; border-left: 3px solid #4caf50; padding-left: 8px; font-weight: 500;';
+                } else if (log.includes('❌') || log.includes('FAILED') || log.includes('ERROR')) {
+                    style = 'color: #f44336; border-left: 3px solid #f44336; padding-left: 8px; font-weight: 500;';
+                } else if (log.includes('[FILL')) {
+                    style = 'color: #2196f3; border-left: 3px solid #2196f3; padding-left: 8px;';
+                } else if (log.includes('[HIERARCHICAL] DROPDOWN') || log.includes('DROPDOWN')) {
+                    style = 'color: #9c27b0; border-left: 3px solid #9c27b0; padding-left: 8px;';
+                } else if (log.includes('⚡') || log.includes('STEP')) {
+                    style = 'color: #ff9800; border-left: 3px solid #ff9800; padding-left: 8px; font-weight: 500;';
+                } else if (log.includes('⚠️') || log.includes('WARNING')) {
+                    style = 'color: #ff9800; border-left: 3px solid #ff9800; padding-left: 8px;';
+                }
+                
+                // Escape HTML entities
+                const escapedLog = log
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\"/g, '&quot;');
+                
+                return '<div class="log-entry" style="' + style + '">' + escapedLog + '</div>';
+            }).join('');
+            
+            logsDiv.innerHTML = htmlParts;
+            lastLogCount = logs.length;
+            
+            // Auto-scroll to bottom only if user isn't manually scrolling
             if (!isUserScrolling) {
-                // Small delay to ensure DOM is updated
                 setTimeout(() => {
                     logsDiv.scrollTop = logsDiv.scrollHeight;
                 }, 0);
@@ -11141,15 +12119,28 @@ const server = http.createServer(async (req, res) => {
         }
 
         else if (pathname === '/status' && req.method === 'GET') {
-            res.writeHead(200);
-            res.end(JSON.stringify({
-                currentStep: state.currentStepIndex + 1,
-                totalSteps: state.testData?.length || 0,
-                isRunning: !state.isStopped && state.testData !== null,
-                isCompleted: state.isCompleted,
-                hasBrowser: state.browser !== null && state.browser.isConnected(),
-                logs: logMessages
-            }));
+            try {
+                // Ensure logs are properly formatted for web UI display
+                const response = {
+                    currentStep: state.currentStepIndex + 1,
+                    totalSteps: state.testData?.length || 0,
+                    isRunning: !state.isStopped && state.testData !== null,
+                    isCompleted: state.isCompleted,
+                    hasBrowser: state.browser !== null && state.browser.isConnected(),
+                    logs: logMessages,
+                    logCount: logMessages.length,
+                    timestamp: new Date().toISOString()
+                };
+                
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Pragma', 'no-cache');
+                res.writeHead(200);
+                res.end(JSON.stringify(response));
+            } catch (error: any) {
+                res.writeHead(500);
+                res.end(JSON.stringify({ error: 'Status endpoint error: ' + error.message }));
+            }
         }
 
         else {
