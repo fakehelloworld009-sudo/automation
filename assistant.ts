@@ -8767,6 +8767,99 @@ async function handleHierarchicalDropdown(target: string): Promise<boolean> {
 
         if (!dropdownInfo) {
             log(`   ❌ FAILED: Could not find dropdown control for "${parentText}"`);
+            log(`   💡 Attempting fallback: searching for ANY select element containing option "${optionText}"...`);
+            
+            // FALLBACK: Search for ANY select that has this option
+            const fallbackInfo = await state.page.evaluate((searchOption: string) => {
+                const selects = document.querySelectorAll('select');
+                
+                for (let i = 0; i < selects.length; i++) {
+                    const el = selects[i] as HTMLSelectElement;
+                    const options: any[] = [];
+                    
+                    for (let j = 0; j < el.options.length; j++) {
+                        const opt = el.options[j];
+                        options.push({
+                            value: opt.value,
+                            text: opt.text,
+                            textLower: opt.text.toLowerCase()
+                        });
+                    }
+                    
+                    // Check if ANY option matches what we're looking for
+                    for (const opt of options) {
+                        if (opt.textLower === searchOption.toLowerCase() || opt.textLower.includes(searchOption.toLowerCase())) {
+                            // Found a select with this option!
+                            return {
+                                type: 'SELECT',
+                                selectIndex: i,
+                                selectText: Array.from(el.options)
+                                    .map(o => o.text)
+                                    .join(''),
+                                options: options,
+                                elementId: el.id || null,
+                                elementName: el.name || null,
+                                selectElement: el
+                            };
+                        }
+                    }
+                }
+                
+                return null;
+            }, optionText);
+            
+            if (fallbackInfo) {
+                log(`   ✅ FALLBACK SUCCESS: Found select element containing option "${optionText}"`);
+                const dropdownToUse = fallbackInfo;
+                
+                // Now proceed with option selection using this fallback dropdown
+                log(`\n📍 STEP 2️⃣  - USING NATIVE SELECT HANDLER FOR HTML <SELECT> ELEMENT`);
+                
+                let optionToSelect: any = dropdownToUse.options.find((opt: any) => 
+                    opt.textLower === optionText.toLowerCase() || opt.textLower.includes(optionText.toLowerCase())
+                );
+                
+                if (!optionToSelect) {
+                    log(`   ❌ Option not found even in fallback`);
+                    return false;
+                }
+                
+                log(`   📋 Found option: "${optionToSelect.text}"`);
+                log(`\n📍 STEP 3️⃣  - SELECTING OPTION USING PLAYWRIGHT API...`);
+                log(`   Option value: "${optionToSelect.value}"`);
+                log(`   Option text: "${optionToSelect.text}"`);
+                
+                try {
+                    // Try with DOM manipulation first (most reliable)
+                    const setSuccess = await state.page.evaluate((args) => {
+                        const selects = document.querySelectorAll('select');
+                        for (let i = 0; i < selects.length; i++) {
+                            const sel = selects[i] as HTMLSelectElement;
+                            for (let j = 0; j < sel.options.length; j++) {
+                                if (sel.options[j].text === args.optionText || sel.options[j].value === args.optionValue) {
+                                    sel.selectedIndex = j;
+                                    sel.value = args.optionValue || args.optionText;
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                    sel.dispatchEvent(new Event('input', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }, {optionText: optionToSelect.text, optionValue: optionToSelect.value});
+                    
+                    if (setSuccess) {
+                        log(`\n${'='.repeat(80)}`);
+                        log(`✅ SUCCESS: Selected "${optionToSelect.text}" from dropdown (FALLBACK METHOD)`);
+                        log(`${'='.repeat(80)}\n`);
+                        await state.page.waitForTimeout(600);
+                        return true;
+                    }
+                } catch (e: any) {
+                    log(`   ❌ Fallback failed: ${e.message}`);
+                }
+            }
+            
             return false;
         }
 
