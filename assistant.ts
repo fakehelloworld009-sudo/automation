@@ -136,6 +136,15 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
     try {
         log(`\n👁️  [VISUAL SCROLL] Element to ${action}: "${targetText}"`);
         
+        // Handle hierarchical targets with " > " separator
+        let searchText = targetText;
+        if (targetText.includes(' > ')) {
+            // For hierarchical targets, search for the option part (after ">")
+            const parts = targetText.split(' > ');
+            searchText = parts[parts.length - 1].trim();
+            log(`   🔄 [HIERARCHICAL TARGET] Extracted search term: "${searchText}"`);
+        }
+        
         // Step 1: Find the element by text (same logic as click/fill)
         log(`   🔍 Searching for element...`);
         const elementFound = await state.page.evaluate((target: string) => {
@@ -167,7 +176,7 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
             }
             
             return { found: false };
-        }, targetText);
+        }, searchText);
 
         if (!elementFound?.found) {
             log(`   ⚠️  Element NOT FOUND`);
@@ -182,7 +191,7 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
         let scrollSuccess = false;
         try {
             // Strategy 1: Try to scroll button specifically
-            await state.page.locator('button:has-text("' + targetText + '")').first().scrollIntoViewIfNeeded({ timeout: 3000 });
+            await state.page.locator('button:has-text("' + searchText + '")').first().scrollIntoViewIfNeeded({ timeout: 3000 });
             scrollSuccess = true;
             log(`   ✅ Scrolled successfully (button)`);
         } catch (e) {
@@ -212,7 +221,7 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
                         }
                     }
                     return false;
-                }, targetText);
+                }, searchText);
                 
                 scrollSuccess = true;
                 log(`   ✅ Scrolled successfully (element + parents)`);
@@ -248,7 +257,7 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
                 }
             }
             return false;
-        }, targetText);
+        }, searchText);
         
         log(`   ✅ Element highlighted with RED BORDER`);
         
@@ -286,7 +295,7 @@ async function scrollAndHighlightElement(targetText: string, action: string = 'I
                 }
             }
             return false;
-        }, targetText);
+        }, searchText);
         
         log(`   ✅ Ready for interaction\n`);
         return true;
@@ -11039,28 +11048,43 @@ async function executeStep(stepData: any): Promise<StepResult> {
         }
 
         else if (action === 'SELECT') {
+            log(`📋 [SELECT ACTION] Target: "${target}" | Value: "${data}"`);
+            
+            // NEW: Scroll and highlight dropdown before selecting
+            await scrollAndHighlightElement(target, 'SELECT');
+            
             try {
                 if (state.page.isClosed()) {
                     await switchToLatestPage();
                     if (!state.page || state.page.isClosed()) throw new Error('Page closed');
                 }
                 
-                await executeWithPageReady(
-                    async () => state.page.selectOption(target, data, { timeout: 5000 }),
-                    `${stepId}_SELECT`
-                );
-                await new Promise(resolve => setTimeout(resolve, 300));
+                // Use handleDropdown for instant value change (like Onboarding Channel works)
+                log(`   🔽 Using handleDropdown() for instant value change...`);
+                const success = await handleDropdown(target, data);
                 
-                // Log window after action
-                const isMainWindow = state.page === allPages[0];
-                const windowInfo = windowHierarchy.get(state.page);
-                const windowLevel = windowInfo?.level || 0;
-                const storedTitle = windowInfo?.title || (await state.page.title().catch(() => 'Unknown'));
-                const windowLabel = isMainWindow ? '🏠 MAIN WINDOW' : `📍 SUBWINDOW (L${windowLevel}) "${storedTitle}"`;
+                if (success) {
+                    log(`   ✅ Successfully selected: ${data}`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Log window after action
+                    const isMainWindow = state.page === allPages[0];
+                    const windowInfo = windowHierarchy.get(state.page);
+                    const windowLevel = windowInfo?.level || 0;
+                    const storedTitle = windowInfo?.title || (await state.page.title().catch(() => 'Unknown'));
+                    const windowLabel = isMainWindow ? '🏠 MAIN WINDOW' : `📍 SUBWINDOW (L${windowLevel}) "${storedTitle}"`;
+                    
+                    result.status = 'PASS';
+                    result.actualOutput = `Selected: ${data} | ${windowLabel}`;
+                } else {
+                    log(`   ❌ Failed to select: ${data}`);
+                    result.status = 'FAIL';
+                    result.remarks = 'Could not select option';
+                    result.actualOutput = `Failed to select: ${data}`;
+                }
                 
-                result.status = 'PASS';
-                result.actualOutput = `Selected: ${data} | ${windowLabel}`;
             } catch (e: any) {
+                log(`   ❌ SELECT action error: ${e.message}`);
                 result.status = 'FAIL';
                 result.remarks = e.message;
                 result.actualOutput = `Failed to select`;
