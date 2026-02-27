@@ -553,6 +553,16 @@ async function preventElementHiding(page) {
 async function aggressivelyProtectFormElements(page) {
     await page.addInitScript(() => {
         console.log(`[SURGICAL-BLOCK] Intercepting CSS modifications to block hiding...`);
+        // Store original element references to detect removal
+        let protectedCheckboxes = new WeakMap();
+        let protectedSelects = new WeakMap();
+        // Initial capture of protected elements
+        function captureProtectedElements() {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            const selects = document.querySelectorAll('select');
+            checkboxes.forEach(cb => protectedCheckboxes.set(cb, true));
+            selects.forEach(sel => protectedSelects.set(sel, true));
+        }
         // Helper to check if element is a protected form element
         function isProtectedElement(el) {
             if (!el || !el.tagName)
@@ -565,7 +575,7 @@ async function aggressivelyProtectFormElements(page) {
             const hasOptionRole = el.getAttribute?.('role') === 'option';
             return isCheckbox || isOption || isSelect || isLabel || hasCheckboxRole || hasOptionRole;
         }
-        // INTERCEPT 1: Block direct style property assignments
+        // INTERCEPT 1: Block direct style property assignments on the element itself
         const originalStyleDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'style');
         const originalStyleGetter = originalStyleDescriptor?.get;
         const originalStyleSetter = originalStyleDescriptor?.set;
@@ -592,14 +602,21 @@ async function aggressivelyProtectFormElements(page) {
         Object.defineProperty(CSSStyleDeclarationProto, 'cssText', {
             get: originalCSSText?.get,
             set(value) {
-                const parentElement = this.parentElement || this.ownerElement;
-                if (isProtectedElement(parentElement)) {
-                    const cssLower = value.toLowerCase();
-                    if (cssLower.includes('display:none') || cssLower.includes('visibility:hidden') ||
-                        cssLower.includes('opacity:0') || cssLower.includes('display: none') ||
-                        cssLower.includes('visibility: hidden') || cssLower.includes('opacity: 0')) {
-                        console.warn(`[SURGICAL-BLOCK] BLOCKED cssText on ${parentElement?.tagName}:`, value);
-                        return; // Don't apply hiding
+                const cssLower = (value || '').toLowerCase();
+                // Check if this cssText is trying to hide something by looking at current context
+                if (cssLower.includes('display:none') || cssLower.includes('visibility:hidden') ||
+                    cssLower.includes('opacity:0') || cssLower.includes('display: none') ||
+                    cssLower.includes('visibility: hidden') || cssLower.includes('opacity: 0')) {
+                    // Try to get the element context - this might be called on different elements
+                    try {
+                        const el = this.ownerElement || this.element;
+                        if (isProtectedElement(el)) {
+                            console.warn(`[SURGICAL-BLOCK] BLOCKED cssText on ${el?.tagName}:`, value);
+                            return; // Don't apply hiding
+                        }
+                    }
+                    catch (e) {
+                        // Ignore context errors
                     }
                 }
                 originalCSSText?.set?.call(this, value);
@@ -608,15 +625,21 @@ async function aggressivelyProtectFormElements(page) {
         // INTERCEPT 3: Block setProperty for display, visibility, opacity
         const originalSetProperty = CSSStyleDeclaration.prototype.setProperty;
         CSSStyleDeclaration.prototype.setProperty = function (prop, value, priority) {
-            const parentElement = this.parentElement || this.ownerElement;
             const propLower = prop?.toLowerCase();
             const valueLower = (value || '').toLowerCase();
-            if (isProtectedElement(parentElement)) {
-                if ((propLower === 'display' && valueLower === 'none') ||
-                    (propLower === 'visibility' && valueLower === 'hidden') ||
-                    (propLower === 'opacity' && (valueLower === '0' || valueLower.includes('0')))) {
-                    console.warn(`[SURGICAL-BLOCK] BLOCKED setProperty ${prop}:${value} on ${parentElement?.tagName}`);
-                    return; // Don't apply
+            if ((propLower === 'display' && valueLower === 'none') ||
+                (propLower === 'visibility' && valueLower === 'hidden') ||
+                (propLower === 'opacity' && (valueLower === '0' || valueLower.includes('0')))) {
+                // Try to identify the element being styled
+                try {
+                    const el = this.ownerElement || this.element;
+                    if (isProtectedElement(el)) {
+                        console.warn(`[SURGICAL-BLOCK] BLOCKED setProperty ${prop}:${value} on ${el?.tagName}`);
+                        return; // Don't apply
+                    }
+                }
+                catch (e) {
+                    // Ignore
                 }
             }
             return originalSetProperty.call(this, prop, value, priority);
@@ -640,7 +663,58 @@ async function aggressivelyProtectFormElements(page) {
             }
             return originalClassListAdd.call(this, ...tokens);
         };
-        console.log(`[SURGICAL-BLOCK] All CSS modification interceptors ACTIVE`);
+        // INTERCEPT 5: Monitor setAttribute for style changes
+        const originalSetAttribute = Element.prototype.setAttribute;
+        Element.prototype.setAttribute = function (name, value) {
+            if (name === 'style' && isProtectedElement(this)) {
+                const valueLower = (value || '').toLowerCase();
+                if (valueLower.includes('display:none') || valueLower.includes('visibility:hidden') ||
+                    valueLower.includes('opacity:0') || valueLower.includes('display: none') ||
+                    valueLower.includes('visibility: hidden') || valueLower.includes('opacity: 0')) {
+                    console.warn(`[SURGICAL-BLOCK] BLOCKED setAttribute style on ${this.tagName}:`, value);
+                    return; // Don't apply
+                }
+            }
+            return originalSetAttribute.call(this, name, value);
+        };
+        // AGGRESSIVE MONITOR: Every 300ms, check if checkboxes/selects are still visible
+        // If any are hidden, force them visible
+        setInterval(() => {
+            // Force checkboxes visible
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach((cb) => {
+                const computedStyle = window.getComputedStyle(cb);
+                if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.warn(`[FORCE-VISIBLE] Checkbox was hidden, forcing visible:`, cb);
+                    cb.style.display = 'inline-block !important';
+                    cb.style.visibility = 'visible !important';
+                    cb.style.opacity = '1 !important';
+                    cb.style.width = 'auto !important';
+                    cb.style.height = 'auto !important';
+                }
+            });
+            // Force selects visible
+            const selects = document.querySelectorAll('select');
+            selects.forEach((sel) => {
+                const computedStyle = window.getComputedStyle(sel);
+                if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden' || computedStyle.opacity === '0') {
+                    console.warn(`[FORCE-VISIBLE] SELECT was hidden, forcing visible:`, sel);
+                    sel.style.display = 'block !important';
+                    sel.style.visibility = 'visible !important';
+                    sel.style.opacity = '1 !important';
+                }
+            });
+            // Force options visible
+            const options = document.querySelectorAll('option');
+            options.forEach((opt) => {
+                const computedStyle = window.getComputedStyle(opt);
+                if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') {
+                    opt.style.display = 'block !important';
+                    opt.style.visibility = 'visible !important';
+                }
+            });
+        }, 300); // Check every 300ms - faster than the 1-2 second disappearance
+        console.log(`[SURGICAL-BLOCK] All CSS modification interceptors and monitors ACTIVE`);
     });
 }
 /* ============== UTILITY FUNCTIONS ============== */
