@@ -260,12 +260,41 @@ async function preventElementHiding(page) {
             for (const cb of Array.from(checkboxes)) {
                 const el = cb;
                 el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; width: auto !important; height: auto !important;';
+                // ALSO PROTECT PARENT CONTAINERS - checkboxes may be inside hidden divs
+                let parent = el.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    parent.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                    parent = parent.parentElement;
+                }
             }
             // 3️⃣ PROTECT RADIO BUTTONS (similar to checkboxes)
             const radios = document.querySelectorAll('input[type="radio"], [role="radio"]');
             for (const radio of Array.from(radios)) {
                 const el = radio;
                 el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                // ALSO PROTECT PARENT CONTAINERS for radios
+                let parent = el.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    parent.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                    parent = parent.parentElement;
+                }
+            }
+            // 3️⃣B PROTECT CHECKBOX/RADIO LABELS (labels pointing to checkboxes/radios)
+            const labels = document.querySelectorAll('label');
+            for (const label of Array.from(labels)) {
+                const el = label;
+                el.style.cssText = 'display: inline !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                // If label has 'for' attribute, make sure the target is visible
+                const forAttr = el.getAttribute('for');
+                if (forAttr) {
+                    const targetInput = document.getElementById(forAttr);
+                    if (targetInput && (targetInput.tagName === 'INPUT')) {
+                        const inputType = targetInput.type;
+                        if (inputType === 'checkbox' || inputType === 'radio') {
+                            targetInput.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                        }
+                    }
+                }
             }
             // 4️⃣ PROTECT BUTTONS (electronic signature button not enabling)
             const buttons = document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]');
@@ -273,6 +302,12 @@ async function preventElementHiding(page) {
                 const el = btn;
                 el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
                 el.disabled = false; // Force button to not be disabled
+                // ALSO PROTECT PARENT CONTAINERS - buttons may be inside hidden divs
+                let parent = el.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    parent.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                    parent = parent.parentElement;
+                }
             }
             // 5️⃣ PROTECT SELECT/DROPDOWNS AND OPTIONS (product options not displaying)
             const selects = document.querySelectorAll('select, [role="listbox"], [role="combobox"]');
