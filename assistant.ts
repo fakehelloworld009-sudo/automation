@@ -273,6 +273,81 @@ async function injectStealthMode(page: Page): Promise<void> {
  * This detects when ANY JavaScript tries to hide form elements and blocks it
  */
 async function preventElementHiding(page: Page): Promise<void> {
+    // ⚡ IMMEDIATE PROTECTION - Run before page JavaScript can hide anything
+    await page.addInitScript(() => {
+        // Block all display:none assignments to checkboxes at the property setter level
+        const createProtectedProperty = (element: HTMLElement, property: string) => {
+            let value = '';
+            Object.defineProperty(element.style, property, {
+                get() {
+                    return value;
+                },
+                set(v: string) {
+                    const isCheckbox = element.tagName === 'INPUT' && (element as any).type === 'checkbox';
+                    const isCheckboxRole = element.getAttribute('role') === 'checkbox';
+                    
+                    if ((isCheckbox || isCheckboxRole) && 
+                        (property === 'display' && v === 'none') ||
+                        (property === 'visibility' && v === 'hidden') ||
+                        (property === 'opacity' && v === '0')) {
+                        console.warn(`[CHECKBOX-IMMEDIATE] BLOCKED: Attempt to hide checkbox via style.${property} = "${v}"`, element);
+                        return; // Don't set
+                    }
+                    value = v;
+                }
+            });
+        };
+        
+        // Watch for new checkboxes as they're added to DOM
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList') {
+                    for (const node of Array.from(mutation.addedNodes)) {
+                        if (node.nodeType === 1) { // Element
+                            const el = node as HTMLElement;
+                            if ((el.tagName === 'INPUT' && (el as any).type === 'checkbox') || el.getAttribute('role') === 'checkbox') {
+                                // Found new checkbox - protect it IMMEDIATELY
+                                (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                                createProtectedProperty(el, 'display');
+                                createProtectedProperty(el, 'visibility');
+                                createProtectedProperty(el, 'opacity');
+                                console.log(`[CHECKBOX-IMMEDIATE] Found and protected new checkbox`, el);
+                            }
+                            
+                            // Also check for checkboxes inside this element
+                            const innerCheckboxes = el.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+                            for (const cb of Array.from(innerCheckboxes)) {
+                                const cbEl = cb as HTMLElement;
+                                (cbEl as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                                createProtectedProperty(cbEl, 'display');
+                                createProtectedProperty(cbEl, 'visibility');
+                                createProtectedProperty(cbEl, 'opacity');
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Start watching immediately
+        observer.observe(document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+        
+        // Also protect any checkboxes that exist at page load
+        const initialCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+        for (const cb of Array.from(initialCheckboxes)) {
+            const cbEl = cb as HTMLElement;
+            (cbEl as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+            createProtectedProperty(cbEl, 'display');
+            createProtectedProperty(cbEl, 'visibility');
+            createProtectedProperty(cbEl, 'opacity');
+        }
+        
+        console.log(`[CHECKBOX-IMMEDIATE] Property protection initialized - checkboxes cannot be hidden via style properties`);
+    });
+    
     // MASTER PROTECTION: Aggressively protect ALL form elements from being hidden
     await page.addInitScript(() => {
         // Continuously monitor and protect ALL form elements that need visibility
