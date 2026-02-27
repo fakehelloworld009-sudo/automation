@@ -652,6 +652,41 @@ function updateSearchContext(windowPath, frameLevel, totalFrames) {
     log(`🔍 [LIVE SEARCH] Searching in: ${windowPath} (Frame ${frameLevel}/${totalFrames})`);
 }
 /**
+ * SAVE AND RESTORE SCROLL POSITION
+ * Preserve the page scroll position so it doesn't jump back to top after each step
+ */
+let savedScrollPosition = null;
+async function saveScrollPosition() {
+    if (!state.page || state.page.isClosed())
+        return;
+    try {
+        const position = await state.page.evaluate(() => {
+            return {
+                x: window.scrollX || window.pageXOffset || 0,
+                y: window.scrollY || window.pageYOffset || 0
+            };
+        });
+        savedScrollPosition = position;
+        log(`💾 Saved scroll position: Y=${position.y}, X=${position.x}`);
+    }
+    catch (e) {
+        // Silent fail
+    }
+}
+async function restoreScrollPosition() {
+    if (!state.page || state.page.isClosed() || !savedScrollPosition)
+        return;
+    try {
+        await state.page.evaluate(({ x, y }) => {
+            window.scrollTo(x, y);
+        }, savedScrollPosition);
+        log(`🔄 Restored scroll position: Y=${savedScrollPosition.y}, X=${savedScrollPosition.x}`);
+    }
+    catch (e) {
+        // Silent fail
+    }
+}
+/**
  * CRITICAL: Ensure element is scrolled into view on the page
  * This solves viewport visibility issues for Country, Language, and other below-the-fold elements
  */
@@ -10903,6 +10938,9 @@ async function executeStep(stepData) {
                 throw new Error('No valid page available');
             }
         }
+        // 💾 SAVE SCROLL POSITION - Before executing action, save where the page was scrolled to
+        // After action completes, we'll restore to this position so page doesn't jump to top
+        await saveScrollPosition();
         // CRITICAL: Clean up any leftover overlays/modals BEFORE starting the step
         // This ensures the page is ready for interaction
         await cleanupPageAfterStep();
@@ -11101,6 +11139,8 @@ async function executeStep(stepData) {
                 result.remarks = 'Could not click element';
                 result.actualOutput = `Failed to click: ${target}`;
             }
+            // 🔄 RESTORE SCROLL POSITION - Put page back where it was before clicking
+            await restoreScrollPosition();
         }
         else if (action === 'FILL' || action === 'TYPE') {
             // NEW: Scroll and highlight text field before filling
@@ -11150,6 +11190,8 @@ async function executeStep(stepData) {
                 result.remarks = 'Could not fill element';
                 result.actualOutput = `Failed to fill: ${target}`;
             }
+            // 🔄 RESTORE SCROLL POSITION - Put page back where it was before filling
+            await restoreScrollPosition();
         }
         else if (action === 'HOVER') {
             // NEW: Scroll and highlight element before hovering
@@ -11185,6 +11227,8 @@ async function executeStep(stepData) {
                 result.remarks = 'Could not hover element';
                 result.actualOutput = `Failed to hover: ${target}`;
             }
+            // 🔄 RESTORE SCROLL POSITION - Put page back where it was before hovering
+            await restoreScrollPosition();
         }
         else if (action === 'SELECT') {
             log(`📋 [SELECT ACTION] Target: "${target}" | Value: "${data}"`);
@@ -11301,6 +11345,8 @@ async function executeStep(stepData) {
                 result.remarks = e.message;
                 result.actualOutput = `Error: ${e.message}`;
             }
+            // 🔄 RESTORE SCROLL POSITION - Put page back where it was before selecting
+            await restoreScrollPosition();
         }
         else if (action === 'WAIT') {
             const waitTime = parseInt(data) || 1000;
