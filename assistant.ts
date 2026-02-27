@@ -620,97 +620,111 @@ async function preventElementHiding(page: Page): Promise<void> {
 }
 
 /**
- * ULTRA AGGRESSIVE: Continuous protection for checkboxes and options
- * Specifically targets the issue where they disappear after 1-2 seconds
+ * SURGICAL BLOCKING: Block page JavaScript from hiding checkboxes/options at the SOURCE
+ * Instead of continuously re-applying styles, we intercept the hiding attempts before they happen
  */
 async function aggressivelyProtectFormElements(page: Page): Promise<void> {
     await page.addInitScript(() => {
-        // Ultra-aggressive continuous protection every 500ms
-        let protectionCounter = 0;
-        setInterval(() => {
-            protectionCounter++;
+        console.log(`[SURGICAL-BLOCK] Intercepting CSS modifications to block hiding...`);
+        
+        // Helper to check if element is a protected form element
+        function isProtectedElement(el: any): boolean {
+            if (!el || !el.tagName) return false;
             
-            // 🔴 CHECKBOXES - Force ALL checkboxes to be visible and checked if they were before
-            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-            for (const cb of Array.from(checkboxes)) {
-                const input = cb as HTMLInputElement;
-                
-                // Force inline styles with maximum priority
-                input.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; width: 20px !important; height: 20px !important; margin: 5px !important; pointer-events: auto !important; position: relative !important; z-index: 9999 !important;';
-                
-                // Force removal of hiding classes
-                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none', 'ng-hide', 'v-hide', 'sr-only', 'off-screen'];
-                hidingClasses.forEach(cls => input.classList.remove(cls));
-                
-                // Ensure checkbox is enabled
-                input.disabled = false;
-                
-                // Make sure container is visible
-                if (input.parentElement) {
-                    input.parentElement.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+            const isCheckbox = el.tagName === 'INPUT' && el.type === 'checkbox';
+            const isOption = el.tagName === 'OPTION';
+            const isSelect = el.tagName === 'SELECT';
+            const isLabel = el.tagName === 'LABEL';
+            const hasCheckboxRole = el.getAttribute?.('role') === 'checkbox';
+            const hasOptionRole = el.getAttribute?.('role') === 'option';
+            
+            return isCheckbox || isOption || isSelect || isLabel || hasCheckboxRole || hasOptionRole;
+        }
+        
+        // INTERCEPT 1: Block direct style property assignments
+        const originalStyleDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'style');
+        const originalStyleGetter = originalStyleDescriptor?.get;
+        const originalStyleSetter = originalStyleDescriptor?.set;
+        
+        Object.defineProperty(HTMLElement.prototype, 'style', {
+            get() {
+                return (originalStyleGetter as any)?.call(this);
+            },
+            set(value: any) {
+                if (isProtectedElement(this)) {
+                    const styleStr = (typeof value === 'string') ? value.toLowerCase() : '';
+                    if (styleStr.includes('display:none') || styleStr.includes('visibility:hidden') || 
+                        styleStr.includes('opacity:0') || styleStr.includes('display: none') || 
+                        styleStr.includes('visibility: hidden') || styleStr.includes('opacity: 0')) {
+                        console.warn(`[SURGICAL-BLOCK] BLOCKED style assignment on ${this.tagName}:`, value);
+                        return; // Don't apply the hiding style
+                    }
+                }
+                (originalStyleSetter as any)?.call(this, value);
+            }
+        });
+        
+        // INTERCEPT 2: Block cssText modifications
+        const CSSStyleDeclarationProto = CSSStyleDeclaration.prototype;
+        const originalCSSText = Object.getOwnPropertyDescriptor(CSSStyleDeclarationProto, 'cssText');
+        
+        Object.defineProperty(CSSStyleDeclarationProto, 'cssText', {
+            get: originalCSSText?.get,
+            set(value: string) {
+                const parentElement = (this as any).parentElement || (this as any).ownerElement;
+                if (isProtectedElement(parentElement)) {
+                    const cssLower = value.toLowerCase();
+                    if (cssLower.includes('display:none') || cssLower.includes('visibility:hidden') || 
+                        cssLower.includes('opacity:0') || cssLower.includes('display: none') || 
+                        cssLower.includes('visibility: hidden') || cssLower.includes('opacity: 0')) {
+                        console.warn(`[SURGICAL-BLOCK] BLOCKED cssText on ${parentElement?.tagName}:`, value);
+                        return; // Don't apply hiding
+                    }
+                }
+                (originalCSSText?.set as any)?.call(this, value);
+            }
+        });
+        
+        // INTERCEPT 3: Block setProperty for display, visibility, opacity
+        const originalSetProperty = CSSStyleDeclaration.prototype.setProperty;
+        CSSStyleDeclaration.prototype.setProperty = function(prop: string, value?: string, priority?: string) {
+            const parentElement = (this as any).parentElement || (this as any).ownerElement;
+            const propLower = prop?.toLowerCase();
+            const valueLower = (value || '').toLowerCase();
+            
+            if (isProtectedElement(parentElement)) {
+                if ((propLower === 'display' && valueLower === 'none') ||
+                    (propLower === 'visibility' && valueLower === 'hidden') ||
+                    (propLower === 'opacity' && (valueLower === '0' || valueLower.includes('0')))) {
+                    console.warn(`[SURGICAL-BLOCK] BLOCKED setProperty ${prop}:${value} on ${parentElement?.tagName}`);
+                    return; // Don't apply
                 }
             }
+            return originalSetProperty.call(this, prop, value, priority);
+        };
+        
+        // INTERCEPT 4: Block classList.add() for hiding classes
+        const originalClassListAdd = DOMTokenList.prototype.add;
+        DOMTokenList.prototype.add = function(...tokens: string[]) {
+            const ownerElement = (this as any).ownerElement;
+            const hidingClasses = ['hidden', 'hide', 'invisible', 'ng-hide', 'v-hide', 'd-none', 'sr-only', 'off-screen'];
             
-            // 🔵 SELECT/OPTIONS - Force ALL selects and their options to be visible
-            const selects = document.querySelectorAll('select');
-            for (const sel of Array.from(selects)) {
-                const select = sel as HTMLSelectElement;
-                
-                // Force select visibility
-                select.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; position: relative !important; z-index: 9999 !important;';
-                
-                // Force all options visibility
-                for (const option of Array.from(select.options)) {
-                    option.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                    option.disabled = false;
-                }
-                
-                // Remove hiding classes
-                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none'];
-                hidingClasses.forEach(cls => select.classList.remove(cls));
-                
-                // Ensure select is enabled
-                select.disabled = false;
-                
-                // Make sure container is visible
-                if (select.parentElement) {
-                    select.parentElement.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+            if (isProtectedElement(ownerElement)) {
+                const blockedClasses = tokens.filter(t => hidingClasses.includes(t.toLowerCase()));
+                if (blockedClasses.length > 0) {
+                    console.warn(`[SURGICAL-BLOCK] BLOCKED classList.add on ${ownerElement?.tagName}:`, blockedClasses);
+                    // Only add non-hiding classes
+                    const allowedTokens = tokens.filter(t => !hidingClasses.includes(t.toLowerCase()));
+                    if (allowedTokens.length > 0) {
+                        return originalClassListAdd.call(this, ...allowedTokens);
+                    }
+                    return;
                 }
             }
-            
-            // 🟡 DIV[ROLE="LISTBOX"] - Custom select dropdowns
-            const customSelects = document.querySelectorAll('[role="listbox"], [role="combobox"]');
-            for (const custom of Array.from(customSelects)) {
-                const elem = custom as HTMLElement;
-                elem.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                
-                // Force all child options visible
-                const options = elem.querySelectorAll('[role="option"]');
-                for (const opt of Array.from(options)) {
-                    (opt as HTMLElement).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                }
-                
-                // Remove hiding classes
-                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none', 'ng-hide'];
-                hidingClasses.forEach(cls => elem.classList.remove(cls));
-            }
-            
-            // 🟢 LABELS - Make sure checkbox/radio labels are visible
-            const labels = document.querySelectorAll('label');
-            for (const label of Array.from(labels)) {
-                label.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none'];
-                hidingClasses.forEach(cls => label.classList.remove(cls));
-            }
-            
-            // Log status every 10 iterations (every 5 seconds at 500ms interval)
-            if (protectionCounter % 10 === 0) {
-                const checkboxCount = document.querySelectorAll('input[type="checkbox"]').length;
-                const selectCount = document.querySelectorAll('select').length;
-                const customSelectCount = document.querySelectorAll('[role="listbox"]').length;
-                console.log(`[FORM-PROTECT-ULTRA] Status @ ${Math.floor(protectionCounter * 500 / 1000)}s: ${checkboxCount} checkboxes, ${selectCount} selects, ${customSelectCount} custom selects protected`);
-            }
-        }, 500); // Check every 500ms = 2 times per second
+            return originalClassListAdd.call(this, ...tokens);
+        };
+        
+        console.log(`[SURGICAL-BLOCK] All CSS modification interceptors ACTIVE`);
     });
 }
 
