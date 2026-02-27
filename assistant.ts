@@ -273,81 +273,6 @@ async function injectStealthMode(page: Page): Promise<void> {
  * This detects when ANY JavaScript tries to hide form elements and blocks it
  */
 async function preventElementHiding(page: Page): Promise<void> {
-    // ⚡ IMMEDIATE PROTECTION - Run before page JavaScript can hide anything
-    await page.addInitScript(() => {
-        // Block all display:none assignments to checkboxes at the property setter level
-        const createProtectedProperty = (element: HTMLElement, property: string) => {
-            let value = '';
-            Object.defineProperty(element.style, property, {
-                get() {
-                    return value;
-                },
-                set(v: string) {
-                    const isCheckbox = element.tagName === 'INPUT' && (element as any).type === 'checkbox';
-                    const isCheckboxRole = element.getAttribute('role') === 'checkbox';
-                    
-                    if ((isCheckbox || isCheckboxRole) && 
-                        (property === 'display' && v === 'none') ||
-                        (property === 'visibility' && v === 'hidden') ||
-                        (property === 'opacity' && v === '0')) {
-                        console.warn(`[CHECKBOX-IMMEDIATE] BLOCKED: Attempt to hide checkbox via style.${property} = "${v}"`, element);
-                        return; // Don't set
-                    }
-                    value = v;
-                }
-            });
-        };
-        
-        // Watch for new checkboxes as they're added to DOM
-        const observer = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                if (mutation.type === 'childList') {
-                    for (const node of Array.from(mutation.addedNodes)) {
-                        if (node.nodeType === 1) { // Element
-                            const el = node as HTMLElement;
-                            if ((el.tagName === 'INPUT' && (el as any).type === 'checkbox') || el.getAttribute('role') === 'checkbox') {
-                                // Found new checkbox - protect it IMMEDIATELY
-                                (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                                createProtectedProperty(el, 'display');
-                                createProtectedProperty(el, 'visibility');
-                                createProtectedProperty(el, 'opacity');
-                                console.log(`[CHECKBOX-IMMEDIATE] Found and protected new checkbox`, el);
-                            }
-                            
-                            // Also check for checkboxes inside this element
-                            const innerCheckboxes = el.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
-                            for (const cb of Array.from(innerCheckboxes)) {
-                                const cbEl = cb as HTMLElement;
-                                (cbEl as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                                createProtectedProperty(cbEl, 'display');
-                                createProtectedProperty(cbEl, 'visibility');
-                                createProtectedProperty(cbEl, 'opacity');
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Start watching immediately
-        observer.observe(document.documentElement, {
-            childList: true,
-            subtree: true
-        });
-        
-        // Also protect any checkboxes that exist at page load
-        const initialCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
-        for (const cb of Array.from(initialCheckboxes)) {
-            const cbEl = cb as HTMLElement;
-            (cbEl as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-            createProtectedProperty(cbEl, 'display');
-            createProtectedProperty(cbEl, 'visibility');
-            createProtectedProperty(cbEl, 'opacity');
-        }
-        
-        console.log(`[CHECKBOX-IMMEDIATE] Property protection initialized - checkboxes cannot be hidden via style properties`);
-    });
-    
     // MASTER PROTECTION: Aggressively protect ALL form elements from being hidden
     await page.addInitScript(() => {
         // Continuously monitor and protect ALL form elements that need visibility
@@ -369,12 +294,6 @@ async function preventElementHiding(page: Page): Promise<void> {
             for (const cb of Array.from(checkboxes)) {
                 const el = cb as HTMLElement;
                 (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; width: auto !important; height: auto !important;';
-                // ALSO PROTECT PARENT CONTAINERS - checkboxes may be inside hidden divs
-                let parent = el.parentElement;
-                for (let i = 0; i < 5 && parent; i++) {
-                    (parent as any).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                    parent = parent.parentElement;
-                }
             }
             
             // 3️⃣ PROTECT RADIO BUTTONS (similar to checkboxes)
@@ -382,30 +301,6 @@ async function preventElementHiding(page: Page): Promise<void> {
             for (const radio of Array.from(radios)) {
                 const el = radio as HTMLElement;
                 (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                // ALSO PROTECT PARENT CONTAINERS for radios
-                let parent = el.parentElement;
-                for (let i = 0; i < 5 && parent; i++) {
-                    (parent as any).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                    parent = parent.parentElement;
-                }
-            }
-            
-            // 3️⃣B PROTECT CHECKBOX/RADIO LABELS (labels pointing to checkboxes/radios)
-            const labels = document.querySelectorAll('label');
-            for (const label of Array.from(labels)) {
-                const el = label as HTMLElement;
-                (el as any).style.cssText = 'display: inline !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                // If label has 'for' attribute, make sure the target is visible
-                const forAttr = (el as any).getAttribute('for');
-                if (forAttr) {
-                    const targetInput = document.getElementById(forAttr);
-                    if (targetInput && (targetInput.tagName === 'INPUT')) {
-                        const inputType = (targetInput as HTMLInputElement).type;
-                        if (inputType === 'checkbox' || inputType === 'radio') {
-                            (targetInput as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                        }
-                    }
-                }
             }
             
             // 4️⃣ PROTECT BUTTONS (electronic signature button not enabling)
@@ -414,12 +309,6 @@ async function preventElementHiding(page: Page): Promise<void> {
                 const el = btn as HTMLElement;
                 (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
                 (el as any).disabled = false; // Force button to not be disabled
-                // ALSO PROTECT PARENT CONTAINERS - buttons may be inside hidden divs
-                let parent = el.parentElement;
-                for (let i = 0; i < 5 && parent; i++) {
-                    (parent as any).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                    parent = parent.parentElement;
-                }
             }
             
             // 5️⃣ PROTECT SELECT/DROPDOWNS AND OPTIONS (product options not displaying)
@@ -589,119 +478,239 @@ async function preventElementHiding(page: Page): Promise<void> {
         
         console.log(`[FORM-PROTECT] Active monitoring - any attempt to hide forms will be blocked and logged`);
     });
-    
-    // ⚠️ AGGRESSIVE CHECKPOINT MUTATION OBSERVER - Watch for checkboxes being removed from DOM
+
+    // SUPER AGGRESSIVE: Intercept and block form.reset() calls
     await page.addInitScript(() => {
-        // Store all checkboxes found so far with their HTML
-        const checkboxRegistry = new Map<string, {html: string, element: HTMLElement}>();
+        console.log(`[FORM-PROTECT] Intercepting form.reset() calls...`);
         
-        // Initial checkpoint: catalog all checkboxes
-        const catalogCheckboxes = () => {
-            const allCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
-            for (const cb of Array.from(allCheckboxes)) {
-                const key = `${cb.className}_${(cb as any).id}_${(cb as any).name}`;
-                if (!checkboxRegistry.has(key)) {
-                    checkboxRegistry.set(key, {
-                        html: (cb as HTMLElement).outerHTML,
-                        element: cb as HTMLElement
-                    });
-                }
-            }
+        // Store original form reset
+        const originalFormReset = HTMLFormElement.prototype.reset;
+        
+        // Override form.reset()
+        HTMLFormElement.prototype.reset = function() {
+            console.warn(`[FORM-PROTECT] BLOCKED form.reset() call!`, {
+                formId: this.id,
+                formAction: this.action,
+                formMethod: this.method
+            });
+            
+            // DO NOT reset the form - this prevents fields from clearing
+            return;
         };
         
-        // Initial catalog
-        catalogCheckboxes();
+        // Also block document.reset()
+        const originalDocReset = (document as any).reset;
+        if (originalDocReset && typeof originalDocReset === 'function') {
+            (document as any).reset = function() {
+                console.warn(`[FORM-PROTECT] BLOCKED document.reset() call!`);
+                return;
+            };
+        }
+    });
+
+    // TRACK AND PRESERVE: Monitor for form element removal/modification
+    await page.addInitScript(() => {
+        console.log(`[FORM-PROTECT] Starting DOM mutation monitoring...`);
         
-        // Watch for checkbox removal
+        // Store copies of important elements
+        (window as any).__PROTECTED_ELEMENTS__ = {
+            checkboxes: [],
+            options: [],
+            buttons: [],
+            selects: []
+        };
+        
+        // Store all checkboxes and their states
+        function storeCheckboxes() {
+            const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"]'));
+            (window as any).__PROTECTED_ELEMENTS__.checkboxes = checkboxes.map(cb => ({
+                id: (cb as any).id,
+                name: (cb as any).name,
+                value: (cb as any).value,
+                checked: (cb as any).checked,
+                html: (cb as HTMLElement).outerHTML
+            }));
+            console.log(`[FORM-PROTECT] Stored ${checkboxes.length} checkboxes`);
+        }
+        
+        // Store all options
+        function storeOptions() {
+            const options = Array.from(document.querySelectorAll('option, [role="option"]'));
+            (window as any).__PROTECTED_ELEMENTS__.options = options.map(opt => ({
+                text: opt.textContent,
+                value: (opt as any).value,
+                selected: (opt as any).selected,
+                html: (opt as HTMLElement).outerHTML
+            }));
+            console.log(`[FORM-PROTECT] Stored ${options.length} options`);
+        }
+        
+        // Initial storage
+        setTimeout(() => {
+            storeCheckboxes();
+            storeOptions();
+        }, 500); // Wait for page to fully load
+        
+        // Monitor DOM mutations
         const observer = new MutationObserver((mutations) => {
+            let hasChanges = false;
+            
             for (const mutation of mutations) {
                 if (mutation.type === 'childList') {
-                    // Check if any removed nodes were checkboxes
-                    for (const removed of Array.from(mutation.removedNodes)) {
-                        if (removed.nodeType === 1) { // Element node
-                            const el = removed as Element;
-                            if (el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'checkbox') {
-                                console.warn(`[CHECKBOX-PROTECT] DETECTED REMOVAL - Re-inserting checkbox!`, el);
-                                // Try to re-insert at same location
-                                if (mutation.nextSibling) {
-                                    mutation.target.insertBefore(el, mutation.nextSibling);
-                                } else {
-                                    mutation.target.appendChild(el);
-                                }
-                            }
-                            // Check if removed element contains checkboxes
-                            if (el.querySelectorAll && el.querySelectorAll('input[type="checkbox"]').length > 0) {
-                                console.warn(`[CHECKBOX-PROTECT] DETECTED REMOVAL of element containing checkboxes!`, el);
-                                // Mark for re-insertion
-                                (el as any).dataset.checkboxContainer = 'true';
-                            }
+                    // Check if any form elements were removed
+                    mutation.removedNodes.forEach(node => {
+                        if ((node as Element).tagName === 'INPUT' || 
+                            (node as Element).tagName === 'OPTION' ||
+                            (node as Element).className?.includes?.('checkbox') ||
+                            (node as Element).className?.includes?.('option')) {
+                            console.warn(`[FORM-PROTECT] Detected element removal:`, node);
+                            hasChanges = true;
                         }
-                    }
+                    });
                     
-                    // Periodically re-catalog to find new checkboxes
-                    catalogCheckboxes();
+                    // Check if form was modified/added
+                    mutation.addedNodes.forEach(node => {
+                        if ((node as Element).tagName === 'FORM') {
+                            console.warn(`[FORM-PROTECT] New form detected`, node);
+                        }
+                    });
                 }
                 
+                // Check for attribute changes on protected elements
                 if (mutation.type === 'attributes') {
-                    const el = mutation.target as HTMLElement;
-                    if (el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'checkbox') {
-                        // If checkbox is being hidden via class/style, undo it
-                        if (mutation.attributeName === 'class') {
-                            const currentClass = el.className;
-                            if (currentClass.includes('hidden') || currentClass.includes('hide') || currentClass.includes('invisible')) {
-                                el.className = currentClass
-                                    .replace(/\b(hidden|hide|invisible|d-none|d-hide|sr-only|off-screen)\b/gi, '')
-                                    .trim();
-                                console.warn(`[CHECKBOX-PROTECT] REMOVED hiding class from checkbox`, el);
-                            }
-                        }
-                        
-                        // If checkbox style being changed to hide it, undo
-                        if (mutation.attributeName === 'style') {
-                            const display = el.style.display;
-                            const visibility = el.style.visibility;
-                            const opacity = el.style.opacity;
-                            
-                            if (display === 'none' || visibility === 'hidden' || opacity === '0') {
-                                el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
-                                console.warn(`[CHECKBOX-PROTECT] RESET hiding styles on checkbox`, el);
-                            }
+                    const target = mutation.target as HTMLElement;
+                    const isCheckbox = target.tagName === 'INPUT' && (target as any).type === 'checkbox';
+                    const isOption = target.tagName === 'OPTION';
+                    const isSelect = target.tagName === 'SELECT';
+                    
+                    if (isCheckbox || isOption || isSelect) {
+                        if (mutation.attributeName === 'style' || mutation.attributeName === 'class' || mutation.attributeName === 'disabled') {
+                            console.warn(`[FORM-PROTECT] Protected element attribute changed:`, {
+                                tag: target.tagName,
+                                attribute: mutation.attributeName,
+                                newValue: target.getAttribute(mutation.attributeName || ''),
+                                element: target
+                            });
+                            hasChanges = true;
                         }
                     }
                 }
             }
+            
+            // Re-protect if changes detected
+            if (hasChanges) {
+                console.warn(`[FORM-PROTECT] DOM changes detected - re-running protection...`);
+                setTimeout(() => {
+                    storeCheckboxes();
+                    storeOptions();
+                }, 100);
+            }
         });
         
-        // Watch entire document for checkbox changes
-        observer.observe(document.body, {
+        // Start observing the entire DOM tree
+        observer.observe(document.documentElement, {
             childList: true,
-            subtree: true,
             attributes: true,
-            attributeFilter: ['class', 'style', 'hidden'],
-            attributeOldValue: true
+            subtree: true,
+            attributeFilter: ['style', 'class', 'disabled', 'hidden']
         });
         
-        // Also run checkpoint validation every 200ms
+        console.log(`[FORM-PROTECT] DOM mutation observer started`);
+    });
+}
+
+/**
+ * ULTRA AGGRESSIVE: Continuous protection for checkboxes and options
+ * Specifically targets the issue where they disappear after 1-2 seconds
+ */
+async function aggressivelyProtectFormElements(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+        // Ultra-aggressive continuous protection every 500ms
+        let protectionCounter = 0;
         setInterval(() => {
-            const allCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
-            for (const cb of Array.from(allCheckboxes)) {
-                const el = cb as HTMLElement;
-                // Force visibility
-                (el as any).style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+            protectionCounter++;
+            
+            // 🔴 CHECKBOXES - Force ALL checkboxes to be visible and checked if they were before
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            for (const cb of Array.from(checkboxes)) {
+                const input = cb as HTMLInputElement;
                 
-                // Also ensure parent containers are visible
-                let parent = el.parentElement;
-                for (let i = 0; i < 5 && parent; i++) {
-                    // Only force visible if parent has hiding styles
-                    if (parent.style.display === 'none' || parent.style.visibility === 'hidden') {
-                        (parent as any).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
-                    }
-                    parent = parent.parentElement;
+                // Force inline styles with maximum priority
+                input.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; width: 20px !important; height: 20px !important; margin: 5px !important; pointer-events: auto !important; position: relative !important; z-index: 9999 !important;';
+                
+                // Force removal of hiding classes
+                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none', 'ng-hide', 'v-hide', 'sr-only', 'off-screen'];
+                hidingClasses.forEach(cls => input.classList.remove(cls));
+                
+                // Ensure checkbox is enabled
+                input.disabled = false;
+                
+                // Make sure container is visible
+                if (input.parentElement) {
+                    input.parentElement.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
                 }
             }
-        }, 200);
-        
-        console.log(`[CHECKBOX-PROTECT] Mutation observer active - watching for checkbox removal and re-insertion`);
+            
+            // 🔵 SELECT/OPTIONS - Force ALL selects and their options to be visible
+            const selects = document.querySelectorAll('select');
+            for (const sel of Array.from(selects)) {
+                const select = sel as HTMLSelectElement;
+                
+                // Force select visibility
+                select.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; position: relative !important; z-index: 9999 !important;';
+                
+                // Force all options visibility
+                for (const option of Array.from(select.options)) {
+                    option.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                    option.disabled = false;
+                }
+                
+                // Remove hiding classes
+                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none'];
+                hidingClasses.forEach(cls => select.classList.remove(cls));
+                
+                // Ensure select is enabled
+                select.disabled = false;
+                
+                // Make sure container is visible
+                if (select.parentElement) {
+                    select.parentElement.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                }
+            }
+            
+            // 🟡 DIV[ROLE="LISTBOX"] - Custom select dropdowns
+            const customSelects = document.querySelectorAll('[role="listbox"], [role="combobox"]');
+            for (const custom of Array.from(customSelects)) {
+                const elem = custom as HTMLElement;
+                elem.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                
+                // Force all child options visible
+                const options = elem.querySelectorAll('[role="option"]');
+                for (const opt of Array.from(options)) {
+                    (opt as HTMLElement).style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                }
+                
+                // Remove hiding classes
+                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none', 'ng-hide'];
+                hidingClasses.forEach(cls => elem.classList.remove(cls));
+            }
+            
+            // 🟢 LABELS - Make sure checkbox/radio labels are visible
+            const labels = document.querySelectorAll('label');
+            for (const label of Array.from(labels)) {
+                label.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                const hidingClasses = ['hidden', 'hide', 'invisible', 'd-none'];
+                hidingClasses.forEach(cls => label.classList.remove(cls));
+            }
+            
+            // Log status every 10 iterations (every 5 seconds at 500ms interval)
+            if (protectionCounter % 10 === 0) {
+                const checkboxCount = document.querySelectorAll('input[type="checkbox"]').length;
+                const selectCount = document.querySelectorAll('select').length;
+                const customSelectCount = document.querySelectorAll('[role="listbox"]').length;
+                console.log(`[FORM-PROTECT-ULTRA] Status @ ${Math.floor(protectionCounter * 500 / 1000)}s: ${checkboxCount} checkboxes, ${selectCount} selects, ${customSelectCount} custom selects protected`);
+            }
+        }, 500); // Check every 500ms = 2 times per second
     });
 }
 
@@ -1931,6 +1940,7 @@ async function setupPageListeners(page: Page) {
         
         // 🛡️ PROTECT: Prevent JavaScript from hiding form elements in this popup too
         await preventElementHiding(popup);
+        await aggressivelyProtectFormElements(popup);
         
         const popupTitle = await popup.title().catch(() => 'Unknown');
         const popupUrl = popup.url();
@@ -12740,6 +12750,7 @@ async function runAutomation(excelFilePath: string) {
         
         // 🛡️ PROTECT: Prevent JavaScript from hiding form elements
         await preventElementHiding(state.page);
+        await aggressivelyProtectFormElements(state.page);
         
         // Add main page to tracking
         allPages.push(state.page);
