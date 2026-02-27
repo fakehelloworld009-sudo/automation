@@ -459,6 +459,109 @@ async function preventElementHiding(page) {
         window.__FORM_HIDE_ATTEMPTS__ = hideAttempts;
         console.log(`[FORM-PROTECT] Active monitoring - any attempt to hide forms will be blocked and logged`);
     });
+    // ⚠️ AGGRESSIVE CHECKPOINT MUTATION OBSERVER - Watch for checkboxes being removed from DOM
+    await page.addInitScript(() => {
+        // Store all checkboxes found so far with their HTML
+        const checkboxRegistry = new Map();
+        // Initial checkpoint: catalog all checkboxes
+        const catalogCheckboxes = () => {
+            const allCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+            for (const cb of Array.from(allCheckboxes)) {
+                const key = `${cb.className}_${cb.id}_${cb.name}`;
+                if (!checkboxRegistry.has(key)) {
+                    checkboxRegistry.set(key, {
+                        html: cb.outerHTML,
+                        element: cb
+                    });
+                }
+            }
+        };
+        // Initial catalog
+        catalogCheckboxes();
+        // Watch for checkbox removal
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList') {
+                    // Check if any removed nodes were checkboxes
+                    for (const removed of Array.from(mutation.removedNodes)) {
+                        if (removed.nodeType === 1) { // Element node
+                            const el = removed;
+                            if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+                                console.warn(`[CHECKBOX-PROTECT] DETECTED REMOVAL - Re-inserting checkbox!`, el);
+                                // Try to re-insert at same location
+                                if (mutation.nextSibling) {
+                                    mutation.target.insertBefore(el, mutation.nextSibling);
+                                }
+                                else {
+                                    mutation.target.appendChild(el);
+                                }
+                            }
+                            // Check if removed element contains checkboxes
+                            if (el.querySelectorAll && el.querySelectorAll('input[type="checkbox"]').length > 0) {
+                                console.warn(`[CHECKBOX-PROTECT] DETECTED REMOVAL of element containing checkboxes!`, el);
+                                // Mark for re-insertion
+                                el.dataset.checkboxContainer = 'true';
+                            }
+                        }
+                    }
+                    // Periodically re-catalog to find new checkboxes
+                    catalogCheckboxes();
+                }
+                if (mutation.type === 'attributes') {
+                    const el = mutation.target;
+                    if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+                        // If checkbox is being hidden via class/style, undo it
+                        if (mutation.attributeName === 'class') {
+                            const currentClass = el.className;
+                            if (currentClass.includes('hidden') || currentClass.includes('hide') || currentClass.includes('invisible')) {
+                                el.className = currentClass
+                                    .replace(/\b(hidden|hide|invisible|d-none|d-hide|sr-only|off-screen)\b/gi, '')
+                                    .trim();
+                                console.warn(`[CHECKBOX-PROTECT] REMOVED hiding class from checkbox`, el);
+                            }
+                        }
+                        // If checkbox style being changed to hide it, undo
+                        if (mutation.attributeName === 'style') {
+                            const display = el.style.display;
+                            const visibility = el.style.visibility;
+                            const opacity = el.style.opacity;
+                            if (display === 'none' || visibility === 'hidden' || opacity === '0') {
+                                el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                                console.warn(`[CHECKBOX-PROTECT] RESET hiding styles on checkbox`, el);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        // Watch entire document for checkbox changes
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'hidden'],
+            attributeOldValue: true
+        });
+        // Also run checkpoint validation every 200ms
+        setInterval(() => {
+            const allCheckboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"]');
+            for (const cb of Array.from(allCheckboxes)) {
+                const el = cb;
+                // Force visibility
+                el.style.cssText = 'display: inline-block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;';
+                // Also ensure parent containers are visible
+                let parent = el.parentElement;
+                for (let i = 0; i < 5 && parent; i++) {
+                    // Only force visible if parent has hiding styles
+                    if (parent.style.display === 'none' || parent.style.visibility === 'hidden') {
+                        parent.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+                    }
+                    parent = parent.parentElement;
+                }
+            }
+        }, 200);
+        console.log(`[CHECKBOX-PROTECT] Mutation observer active - watching for checkbox removal and re-insertion`);
+    });
 }
 /* ============== UTILITY FUNCTIONS ============== */
 /**
